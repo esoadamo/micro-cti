@@ -1,0 +1,32 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:data.sqlite3"
+}
+
+generator db {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+model Post {
+  id         Int @id @default(autoincrement())
+  source_id  BigInt?
+  source     String
+  user       String
+  created_at DateTime
+  fetched_at DateTime
+  url        String
+  content_html    String
+  content_txt     String
+  raw             String
+  tags_assigned   Boolean @default(false)
+  tags        Tag[]    @relation("PostTags")
+}
+
+model Tag {
+  id   Int   @id @default(autoincrement())
+  name String   @unique
+  color String  @default("#000")
+  posts Post[]  @relation("PostTags")
+}
