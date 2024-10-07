@@ -1,0 +1,8 @@
+config.toml
+*.sqlite3*
+*.db*
+.venv
+.idea
+__pycache__
+Dockerfile
+docker-compose.yaml

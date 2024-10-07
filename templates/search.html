@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<head>
+    <title>MicroCTI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            padding: 8px 16px;
+        }
+
+        #search {
+            width: 100%;
+            font-size: large;
+        }
+
+        .tag {
+            font-family: monospace;
+            font-size: small;
+        }
+
+        .tags {
+            margin-left: 8px;
+        }
+    </style>
+</head>
+
+<form>
+    <input id="search" name="search" value="{{search_term|escape}}">
+</form>
+
+{% if posts %}
+
+<ul>
+{% for (post, score) in posts %}
+<li>
+    <a target=_blank href="{{ post.url|escape }}">{{ post.content_txt[:120]|escape }}...</a> ({{post.user|escape}}, {{post.created_at}}, {{score}})
+    {% if post.tags %}
+    <br>
+    <div class="tags">
+        {% for tag in post.tags %}
+            <span class="tag" style="color: {{ tag.color }}">{{tag.name|escape}}</span>
+        {% endfor   %}
+    </div>
+    {% endif %}
+</li>
+{% endfor %}
+</ul>
+
+{% endif %}
+
+<footer>Latest data ingested at {{latest_ingestion_time}}</footer>
