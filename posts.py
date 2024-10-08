@@ -172,9 +172,11 @@ async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
             matched_ids_score[post.id] *= 0.7
         elif len(post.tags) < 5:
             matched_ids_score[post.id] *= 0.85
+        elif len(post.tags) < 1:
+            matched_ids_score[post.id] *= 0.55
 
     matched_posts.sort(key=lambda x: matched_ids_score[x.id], reverse=True)
-    return [(post, matched_ids_score[post.id]) for post in matched_posts]
+    return [(post, round(matched_ids_score[post.id])) for post in matched_posts]
 
 
 async def get_latest_ingestion_time() -> Optional[datetime]:

@@ -1,3 +1,5 @@
+import time
+
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -16,13 +18,15 @@ def render_template(filename, request, **context):
 
 @app.get("/", response_class=HTMLResponse)
 async def app_search(request: Request) -> str:
+    time_start = time.time()
     search_term = request.query_params.get('search', '')
     posts = []
 
     if search_term:
         posts = await search_posts(search_term)
 
-    return render_template('search.html', request, posts=posts, search_term=search_term, latest_ingestion_time=await get_latest_ingestion_time())
+    time_delta_ms = int(1000 * (time.time() - time_start))
+    return render_template('search.html', request, posts=posts, search_term=search_term, latest_ingestion_time=await get_latest_ingestion_time(), time_render=time_delta_ms)
 
 
 @app.get("/favicon.svg", response_class=FileResponse)
