@@ -12,6 +12,7 @@ from prisma.models import Post
 import fuzzywuzzy
 from mastodon import Mastodon
 from mastodon.utility import AttribAccessList
+import pyairtable
 
 from ai import prompt_tags
 from db import get_db, json_serial
@@ -20,6 +21,11 @@ from db import get_db, json_serial
 def get_mastodon_secrets() -> dict:
     with open("config.toml", 'rb') as f:
         return tomllib.load(f)["mastodon"]
+
+
+def get_airtable_secrets() -> dict:
+    with open("config.toml", 'rb') as f:
+        return tomllib.load(f)["airtable"]
 
 
 def get_mastodon_instance() -> Mastodon:
@@ -32,6 +38,45 @@ def get_mastodon_instance() -> Mastodon:
         api_base_url=secrets["api_base_url"]
     )
 
+
+def get_airtable_instance() -> pyairtable.Table:
+    secrets = get_airtable_secrets()
+    api = pyairtable.Api(secrets["api_key"])
+    return api.table(secrets["base_id"], secrets["table_id"])
+
+
+async def get_airtable_posts() -> AsyncIterable[Post]:
+    airtable = get_airtable_instance()
+    db = await get_db()
+
+    for record in airtable.all():
+        record_id = record["id"]
+        record_fields = record["fields"]
+        created_at = datetime.fromisoformat(record["createdTime"])
+
+        try:
+            user = record_fields["Account"]
+            content_text = content_html = record_fields["Content"]
+            url = record_fields["Link"]
+            source = record_fields["Source"]
+            source_id = record_fields["Id"]
+            raw = json.dumps(record_fields)
+        except KeyError:
+            continue
+
+        post = await db.post.create({
+            'source': source,
+            'source_id': source_id,
+            'user': user,
+            'url': url,
+            'created_at': created_at,
+            'fetched_at': datetime.now(tz=timezone.utc),
+            'content_html': content_html,
+            'content_txt': content_text,
+            'raw': raw
+        })
+        airtable.delete(record_id)
+        yield post
 
 
 async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[AttribAccessList]:
