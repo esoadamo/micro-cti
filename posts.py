@@ -120,6 +120,14 @@ async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
     matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
     matched_ids_score = {x[0][0]: x[1] for x in matched}
     matched_posts = [post for post in all_posts if post.id in matched_ids_score]
+
+    # Penalize posts with small number of tags
+    for post in matched_posts:
+        if len(post.tags) < 3:
+            matched_ids_score[post.id] *= 0.7
+        elif len(post.tags) < 5:
+            matched_ids_score[post.id] *= 0.85
+
     matched_posts.sort(key=lambda x: matched_ids_score[x.id], reverse=True)
     return [(post, matched_ids_score[post.id]) for post in matched_posts]
 
