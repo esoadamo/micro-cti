@@ -4,3 +4,4 @@ beautifulsoup4
 openai
 fuzzywuzzy[speedup]
 fastapi[standard]
+pyairtable
