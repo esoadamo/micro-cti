@@ -35,7 +35,7 @@
 <ul>
 {% for (post, score) in posts %}
 <li>
-    <a target=_blank href="{{ post.url|escape }}">{{ post.content_txt[:120]|escape }}...</a> ({{post.user|escape}}, {{post.created_at}}, {{score}})
+    <a target=_blank href="{{ post.url|escape }}">{{ post.content_txt[:120]|escape }}...</a> ({{post.source|escape}}:{{post.user|escape}}, {{post.created_at}}, {{score}})
     {% if post.tags %}
     <br>
     <div class="tags">
@@ -50,4 +50,4 @@
 
 {% endif %}
 
-<footer>Latest data ingested at {{latest_ingestion_time}}</footer>
+<footer>Latest data ingested at {{latest_ingestion_time}}, took {{time_render}}ms to render.</footer>
