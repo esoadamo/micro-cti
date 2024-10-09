@@ -21,6 +21,7 @@ model Post {
   content_txt     String
   raw             String
   tags_assigned   Boolean @default(false)
+  is_hidden       Boolean @default(false)
   tags        Tag[]    @relation("PostTags")
 }
 
