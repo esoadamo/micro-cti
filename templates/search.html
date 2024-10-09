@@ -30,6 +30,10 @@
     <input id="search" name="search" value="{{search_term|escape}}">
 </form>
 
+{% if error %}
+<pre style="color: red">{{error|escape}}</pre>
+{% endif %}
+
 {% if posts %}
 
 <ul>
