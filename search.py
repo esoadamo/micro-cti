@@ -146,7 +146,7 @@ def format_post_for_search(post: Post) -> str:
 
 async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
     db = await get_db()
-    all_posts = await db.post.find_many(include={'tags': True})
+    all_posts = await db.post.find_many(where={'is_hidden': False}, include={'tags': True})
     post_contents = [(post.id, format_post_for_search(post)) for post in all_posts]
     # noinspection PyUnresolvedReferences
     matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)

@@ -73,6 +73,7 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
             'fetched_at': datetime.now(tz=timezone.utc),
             'content_html': content_html,
             'content_txt': content_text,
+            'is_hidden': len(content_text.split()) < 3,
             'raw': raw
         })
         airtable.delete(record_id)
@@ -111,6 +112,7 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                         'fetched_at': datetime.now(tz=timezone.utc),
                         'content_html': content_html,
                         'content_txt': content_text,
+                        'is_hidden': len(content_txt.split()) < 3,
                         'raw': json.dumps(post, default=json_serial)
                     })
                 yield post
@@ -131,7 +133,7 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
 
 async def generate_tags() -> None:
     db = await get_db()
-    untagged_posts = await db.post.find_many(where={'tags_assigned': False})
+    untagged_posts = await db.post.find_many(where={'tags_assigned': False, 'is_hidden': False})
     print(f'[*] found {len(untagged_posts)} posts to tag')
     
     for i, post in enumerate(untagged_posts):
