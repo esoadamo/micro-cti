@@ -1,8 +1,9 @@
+import itertools
 import re
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from statistics import mean
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Iterable
 
 import fuzzywuzzy
 from lark import Lark, Transformer, v_args, ParseError
@@ -79,7 +80,6 @@ class QueryTransformer(Transformer):
         return {"term": " ".join(words).lower()}
 
     def expr(self, expr):
-        print('expr', expr)
         return expr
 
     def term(self, term):
@@ -132,6 +132,27 @@ def evaluate_ast(ast: Union[list, dict], post: Post) -> float:
     return 1
 
 
+def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
+    if isinstance(ast, dict):
+        if "OR" in ast:
+            for child in ast["OR"]:
+                yield from parse_search_terms(child)
+        if "AND" in ast:
+            queries = []
+            for child in ast["AND"]:
+                child_queries = list(parse_search_terms(child))
+                queries.append(child_queries)
+            queries = filter(lambda x: not not x, queries)
+            yield from [' '.join(item) for item in itertools.product(*queries)]
+        if "exact" in ast:
+            yield ast["exact"]
+        if "term" in ast:
+            yield ast["term"]
+    elif isinstance(ast, list):
+        for child in ast:
+            yield from parse_search_terms(child, prefix)
+
+
 def format_post_for_search(post: Post) -> str:
     tags = ' '.join([x.name[1:] for x in post.tags])
     return ' '.join([
@@ -147,10 +168,15 @@ def format_post_for_search(post: Post) -> str:
 async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
     db = await get_db()
     all_posts = await db.post.find_many(where={'is_hidden': False}, include={'tags': True})
+    query = parse_query(fulltext)
     post_contents = [(post.id, format_post_for_search(post)) for post in all_posts]
-    # noinspection PyUnresolvedReferences
-    matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
-    matched_ids_score = {x[0][0]: x[1] for x in matched}
+    matched_ids_score = {}
+
+    for term in parse_search_terms(query):
+        # noinspection PyUnresolvedReferences
+        matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
+        for (post_id, post_content), score in matched:
+            matched_ids_score[post_id] = score
     matched_posts = [post for post in all_posts if post.id in matched_ids_score]
 
     search_latest = datetime.now(tz=timezone.utc)
