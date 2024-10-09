@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import fuzzywuzzy.process
 import tomllib
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import AsyncIterable, List, Optional, Tuple
 from prisma.models import Post
 
@@ -158,22 +158,50 @@ async def generate_tags() -> None:
         await db.post.update(where={'id': post.id}, data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
 
 
+def format_post_for_search(post: Post) -> str:
+    tags = ' '.join([x.name[1:] for x in post.tags])
+    return ' '.join([
+        post.content_txt,
+        tags,
+        f"{post.source}:{post.source}",
+        post.created_at.isoformat()
+    ])
+
+
 async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
     db = await get_db()
     all_posts = await db.post.find_many(include={'tags': True})
-    post_contents = [(post.id, ' '.join([x.name[1:] for x in post.tags]) + ' ' + post.content_txt + ' ' + ' '.join([x.name[1:] for x in post.tags])) for post in all_posts]
+    post_contents = [(post.id, format_post_for_search(post)) for post in all_posts]
     matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
     matched_ids_score = {x[0][0]: x[1] for x in matched}
     matched_posts = [post for post in all_posts if post.id in matched_ids_score]
 
-    # Penalize posts with small number of tags
+    search_latest = datetime.now(tz=timezone.utc)
+    search_earliest = search_latest - timedelta(days=7)
+
     for post in matched_posts:
+        # Penalize posts with small number of tags
         if len(post.tags) < 3:
             matched_ids_score[post.id] *= 0.7
         elif len(post.tags) < 5:
             matched_ids_score[post.id] *= 0.85
         elif len(post.tags) < 1:
             matched_ids_score[post.id] *= 0.55
+
+        # Penalize posts that are outside the search range
+        days_outside_search_range = 0
+        if post.created_at < search_earliest:
+            days_outside_search_range = (search_earliest - post.created_at).days
+        elif post.created_at > search_latest:
+            days_outside_search_range = (post.created_at - search_latest).days
+        if days_outside_search_range > 0:
+            matched_ids_score[post.id] *= 0.9
+        elif days_outside_search_range > 21:
+            matched_ids_score[post.id] *= 0.8
+        elif days_outside_search_range > 60:
+            matched_ids_score[post.id] *= 0.7
+        elif days_outside_search_range > 180:
+            matched_ids_score[post.id] *= 0.6
 
     matched_posts.sort(key=lambda x: matched_ids_score[x.id], reverse=True)
     return [(post, round(matched_ids_score[post.id])) for post in matched_posts]
