@@ -1,29 +1,30 @@
+import re
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from statistics import mean
 from typing import List, Tuple, Union
 
 import fuzzywuzzy
-from lark import Lark, Transformer, v_args
+from lark import Lark, Transformer, v_args, ParseError
 from prisma.models import Post
 
 from db import get_db
 
-SEARCH_GRAMMAR = """
+SEARCH_GRAMMAR = r"""
 ?start: expr
 
-?expr: expr OR term   -> or_expr
+?expr: expr term   -> or_expr
+     | expr_explicit
+     
+?expr_explicit: expr OR term   -> or_expr
      | term
 
 ?term: term AND factor -> and_expr
      | factor
 
-?factor: search_field
-       | quoted_phrase
+?factor: quoted_phrase
        | multi_word
        | "(" expr ")"
-
-search_field: FIELD ":" multi_word
 
 multi_word: WORD+
 
@@ -31,8 +32,6 @@ quoted_phrase: ESCAPED_STRING
 
 AND: "AND"
 OR: "OR"
-
-FIELD: "source" | "user"
 
 WORD: /[^\s()]+/
 
@@ -70,9 +69,6 @@ class QueryTransformer(Transformer):
                 and_terms.append(arg)
         return {"AND": and_terms}
 
-    def search_field(self, field, value):
-        return {"field": field.lower(), "value": value.lower()}
-
     def quoted_phrase(self, phrase):
         # Remove surrounding quotes and convert to lowercase
         clean_phrase = phrase[1:-1].lower()
@@ -100,7 +96,7 @@ def parse_query(query):
     try:
         tree = parser.parse(query)
     except Exception as e:
-        raise ValueError(f"Invalid query syntax: {e}")
+        raise ParseError(f"Invalid query syntax: {e}")
     transformer = QueryTransformer()
     return transformer.transform(tree)
 
@@ -113,22 +109,22 @@ def evaluate_ast(ast: Union[list, dict], post: Post) -> float:
         if "AND" in ast:
             # AND score is counted as product of the children
             return reduce(lambda a, b: a * b, [evaluate_ast(child, post) for child in ast["AND"]])
-        if "field" in ast:
-            field = ast["field"]
-            value = ast["value"]
-
-            match field:
-                case "source":
-                    return 1.0 if value.lower() in post.source.lower() else 0.5
-                case "user":
-                    return 1.0 if value.lower() in post.user.lower() else 0.5
-            return 1.0
         if "exact" in ast:
             # Exact match has 50 % penalty if not found
             phrase = ast["exact"]
             return 1.0 if phrase.lower() in format_post_for_search(post) else 0.5
         if "term" in ast:
-            # Generic term has no penalty
+            # Compare generic term
+            term = ast["term"]
+
+            match_user = re.match(r"(?:^|.*\s)user:(\S+).*", term)
+            match_source = re.match(r"(?:^|.*\s)source:(\S+).*", term)
+
+            if match_user:
+                return 1 if post.user.lower().startswith(match_user.group(1).lower()) else 0.3
+            if match_source:
+                return 1 if post.source.lower().startswith(match_source.group(1).lower()) else 0.3
+
             return 1
     elif isinstance(ast, list):
         # Mean of all children
