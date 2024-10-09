@@ -4,7 +4,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from posts import search_posts, get_latest_ingestion_time
+from posts import get_latest_ingestion_time
+from search import search_posts
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
