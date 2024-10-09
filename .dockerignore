@@ -6,3 +6,5 @@ config.toml
 __pycache__
 Dockerfile
 docker-compose.yaml
+.run
+.idea
