@@ -14,7 +14,7 @@ from mastodon import Mastodon
 from mastodon.utility import AttribAccessList
 import pyairtable
 
-from ai import prompt_tags
+from ai import prompt_tags, prompt_check_cybersecurity_post
 from db import get_db, json_serial
 
 
@@ -64,23 +64,27 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
         except KeyError:
             continue
 
-        post = await db.post.create({
-            'source': source,
-            'source_id': source_id,
-            'user': user,
-            'url': url,
-            'created_at': created_at,
-            'fetched_at': datetime.now(tz=timezone.utc),
-            'content_html': content_html,
-            'content_txt': content_text,
-            'is_hidden': len(content_text.split()) < 3,
-            'raw': raw
-        })
+        if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+            post = await db.post.create({
+                'source': source,
+                'source_id': source_id,
+                'user': user,
+                'url': url,
+                'created_at': created_at,
+                'fetched_at': datetime.now(tz=timezone.utc),
+                'content_html': content_html,
+                'content_txt': content_text,
+                'is_hidden': len(content_text.split()) < 3,
+                'raw': raw
+            })
+            if not post.is_hidden:
+                await hide_post_if_not_about_cybersecurity(post)
+            if not post.is_hidden:
+                yield post
         airtable.delete(record_id)
-        yield post
 
 
-async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[AttribAccessList]:
+async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
     if min_id is None:
         max_post = await (await get_db()).post.find_first(where={'source': 'mastodon'}, order={'source_id': 'desc'})
         min_id = max_post.id if max_post is not None else None
@@ -103,19 +107,23 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                     content_text = BeautifulSoup(content_html, "html.parser").get_text(separator="", strip=True)
                     content_text = re.sub(r'#\s+(\w)', r'#\1', content_text)
                     db = await get_db()
-                    await db.post.create({
-                        'source': 'mastodon',
-                        'source_id': post['id'],
-                        'user': post['account']['acct'],
-                        'url': post['url'] or post['uri'],
-                        'created_at': post['created_at'],
-                        'fetched_at': datetime.now(tz=timezone.utc),
-                        'content_html': content_html,
-                        'content_txt': content_text,
-                        'is_hidden': len(content_txt.split()) < 3,
-                        'raw': json.dumps(post, default=json_serial)
-                    })
-                yield post
+                    if not await db.post.find_first(where={'source': 'mastodon', 'source_id': post['id']}):
+                        post = await db.post.create({
+                            'source': 'mastodon',
+                            'source_id': post['id'],
+                            'user': post['account']['acct'],
+                            'url': post['url'] or post['uri'],
+                            'created_at': post['created_at'],
+                            'fetched_at': datetime.now(tz=timezone.utc),
+                            'content_html': content_html,
+                            'content_txt': content_text,
+                            'is_hidden': len(content_txt.split()) < 3,
+                            'raw': json.dumps(post, default=json_serial)
+                        })
+                        if not post.is_hidden:
+                            await hide_post_if_not_about_cybersecurity(post)
+                        if not post.is_hidden:
+                            yield post
             else:
                 ended = True
                 print('[*] Selected end time reached, exiting')
@@ -158,6 +166,14 @@ async def generate_tags() -> None:
 
         tags = [await db.tag.upsert(where={"name": tag_name}, data={'create': {"name": tag_name, "color": generate_random_color()}, 'update': {}}) for tag_name in tag_names]
         await db.post.update(where={'id': post.id}, data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
+
+
+async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
+    db = await get_db()
+    result = prompt_check_cybersecurity_post(post)
+    if not result:
+        await db.post.update(where={'id': post.id}, data={'is_hidden': True})
+    return result
 
 
 async def get_latest_ingestion_time() -> Optional[datetime]:
