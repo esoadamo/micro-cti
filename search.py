@@ -1,9 +1,10 @@
 import itertools
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from statistics import mean
-from typing import List, Tuple, Union, Iterable
+from typing import List, Tuple, Union, Iterable, Optional
 
 import fuzzywuzzy
 from lark import Lark, Transformer, v_args, ParseError
@@ -165,7 +166,10 @@ def format_post_for_search(post: Post) -> str:
     ])
 
 
-async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
+async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
+    back_data = back_data if back_data is not None else {}
+    back_data['time_start'] = time.time()
+
     db = await get_db()
     all_posts = await db.post.find_many(where={'is_hidden': False}, include={'tags': True})
     query = parse_query(fulltext)
@@ -173,6 +177,7 @@ async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
     matched_ids_score = {}
 
     for term in parse_search_terms(query):
+        back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
         # noinspection PyUnresolvedReferences
         matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
         for (post_id, post_content), score in matched:
@@ -210,4 +215,7 @@ async def search_posts(fulltext: str) -> List[Tuple[Post, int]]:
         matched_ids_score[post.id] *= evaluate_ast(parse_query(fulltext), post)
 
     matched_posts.sort(key=lambda x: matched_ids_score[x.id], reverse=True)
-    return [(post, round(matched_ids_score[post.id])) for post in matched_posts]
+    result = [(post, round(matched_ids_score[post.id])) for post in matched_posts]
+    back_data['time_end'] = time.time()
+    back_data['time_total'] = back_data['time_start'] - back_data['time_end']
+    return result

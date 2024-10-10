@@ -1,18 +1,37 @@
 <!DOCTYPE html>
 <head>
     <title>MicroCTI</title>
+     <meta name="description" content="A microblog search engine for cybersecurity experts">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/favicon.svg">
+    <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/hack-font@3/build/web/hack-subset.css">
     <style>
+    	* {
+  	    	font-family: Hack, monospace;
+    	}
+
         body {
             display: flex;
             flex-direction: column;
             padding: 8px 16px;
         }
 
+        footer {
+        	margin-top: 16px;
+        }
+
+        .faq {
+        	margin-bottom: 8px;
+        }
+
+        h4 {
+        	margin-bottom: 4px;
+        }
+
         #search {
             width: 100%;
             font-size: large;
+            padding: 8px;
         }
 
         .tag {
@@ -35,7 +54,6 @@
 {% endif %}
 
 {% if posts %}
-
 <ul>
 {% for (post, score) in posts %}
 <li>
@@ -51,7 +69,31 @@
 </li>
 {% endfor %}
 </ul>
+{% else %}
+
+<p>Welcome to the microblog cyber threat intelligence search engine. Just use the search and follow links.</p>
+
+<h3 class="faq">FAQ</h3>
+
+<h4>Q: How does this work?</h4>
+<p>A: This service periodically ingests data from a few selected microblogging platforms
+through official APIs or services. On the background, it filters for posts only regarding
+cybersecurity and tries to remove anything else. When you use the search, only a snippet
+of the post is shown and you are more than encouranged to visit the original source yourself.</p>
+
+<h4>Q: How do I use the search?</h4>
+<p>A: Enter your search query to the input box, just as with classical search engine.</p>
+
+<h4>Q: Is there advanced search?</h4>
+<p>A: Yes! Try e.g. <i>(vulnerability AND source:mastodon) OR ("vuln exploit" AND user:esoadamo)</i></p>
+
+<h4>Q: How much does this cost?</h4>
+<p>A: You? Enjoy the free threat intelligence. Me? Right now, a few bucks per month.</i></p>
+
+<h4>Q: Can you add/remove my posts?</h4>
+<p>A: Sure! Just write me a mail/ping me.</i></p>
+
 
 {% endif %}
 
-<footer>Latest data ingested at {{latest_ingestion_time}}, took {{time_render}}ms to render.</footer>
+<footer>Latest data ingested at {{latest_ingestion_time}}, took {{time_render}} ms to render {{search_count}} searches.</footer>
