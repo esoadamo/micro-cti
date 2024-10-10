@@ -24,11 +24,12 @@ async def app_search(request: Request) -> _TemplateResponse:
     time_start = time.time()
     search_term = request.query_params.get('search', '')
     posts = []
+    search_back_data = {}
     error = ""
 
     if search_term:
         try:
-            posts = await search_posts(search_term)
+            posts = await search_posts(search_term, search_back_data)
         except ParseError as e:
             error = str(e)
 
@@ -40,7 +41,8 @@ async def app_search(request: Request) -> _TemplateResponse:
         search_term=search_term,
         latest_ingestion_time=await get_latest_ingestion_time(),
         error=error,
-        time_render=time_delta_ms
+        time_render=time_delta_ms,
+        search_count=search_back_data.get('cnt_search', 0)
     )
 
 
