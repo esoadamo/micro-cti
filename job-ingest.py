@@ -3,7 +3,7 @@ import asyncio
 from posts import generate_tags, get_mastodon_posts, get_airtable_posts
 
 
-async def main() -> None:
+async def main() -> None:    
     print('[*] Fetching started')
     async for _ in get_airtable_posts():
         pass

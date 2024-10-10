@@ -6,3 +6,5 @@ config.toml
 __pycache__
 .gitignore
 .run
+*.log
+

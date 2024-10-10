@@ -2,7 +2,7 @@ import re
 import time
 import tomllib
 from openai import OpenAI
-
+from prisma.models import Post
 
 def get_client() -> OpenAI:
     with open("config.toml", 'rb') as f:
@@ -46,3 +46,18 @@ def prompt_tags(text: str) -> list[str]:
     if response is None:
         return []
     return  list(re.findall(r'#\w+', response))
+
+
+def prompt_check_cybersecurity_post(post: Post) -> bool:
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful categorization automaton capable of deciding if a post sent by the user is about some cybersecurity topic or some other subject. " +
+                       "You output only YES or NO and nothing else."
+        }, {
+            "role": "user",
+            "content": post.content_txt
+        }
+    ]
+
+    return 'yes' in prompt(messages).lower()
