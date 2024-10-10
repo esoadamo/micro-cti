@@ -5,11 +5,11 @@ from posts import generate_tags, get_mastodon_posts, get_airtable_posts
 
 async def main() -> None:    
     print('[*] Fetching started')
-    async for _ in get_airtable_posts():
-        pass
+    async for post in get_airtable_posts():
+        print('[-]', post)
     print('[*] Airtable fetched')
-    async for _ in get_mastodon_posts():
-        pass
+    async for post in get_mastodon_posts():
+        print('[-]', post)
     print('[*] Mastodon fetched')
     await generate_tags()
     print('[*] Tags generated')
