@@ -79,8 +79,7 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
             })
             if not post.is_hidden:
                 await hide_post_if_not_about_cybersecurity(post)
-            if not post.is_hidden:
-                yield post
+            yield await db.post.find_unique(where={'id': post.id})
         airtable.delete(record_id)
 
 
@@ -117,13 +116,12 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                             'fetched_at': datetime.now(tz=timezone.utc),
                             'content_html': content_html,
                             'content_txt': content_text,
-                            'is_hidden': len(content_txt.split()) < 3,
+                            'is_hidden': len(content_text.split()) < 3,
                             'raw': json.dumps(post, default=json_serial)
                         })
                         if not post.is_hidden:
                             await hide_post_if_not_about_cybersecurity(post)
-                        if not post.is_hidden:
-                            yield post
+                        yield await db.post.find_unique(where={'id': post.id})
             else:
                 ended = True
                 print('[*] Selected end time reached, exiting')
@@ -152,14 +150,7 @@ async def generate_tags() -> None:
         tag_names = set(re.findall(r'#\w+', post_content))
 
         if len(post_content.split()) > 15:
-            try:
-                tag_names.update(set(prompt_tags(post_content)))
-                import time
-                time.sleep(1)
-            except Exception:
-                import traceback, time
-                traceback.print_exc()
-                time.sleep(15)
+            tag_names.update(set(prompt_tags(post_content)))
 
         tag_names = {x.upper() for x in tag_names}
         print("[-]", tag_names)
@@ -169,6 +160,10 @@ async def generate_tags() -> None:
 
 
 async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
+    keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing', 'bypass', 'outage', 'steal', 'malicious', 'compromise'}
+    for keyword in keywords_whitelist:
+        if keyword.lower() in post.content_txt.lower():
+            return True
     db = await get_db()
     result = prompt_check_cybersecurity_post(post)
     if not result:
