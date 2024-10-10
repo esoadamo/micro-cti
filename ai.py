@@ -1,6 +1,7 @@
 import re
 import time
 import tomllib
+import traceback
 from openai import OpenAI
 from prisma.models import Post
 
@@ -11,13 +12,19 @@ def get_client() -> OpenAI:
     return OpenAI(base_url=config["base_url"], api_key=config["api_key"]), config["model"]
 
 
-def prompt(messages: list, timeout: int = 60) -> str:
+def prompt(messages: list, tries: int = 5, prompt_sleep: int = 20, retry_sleep: int = 30) -> str:
     client, model = get_client()
-    completion = client.chat.completions.create(
-        model=model,
-        messages=messages,
-    )
-    time.sleep(20)
+    for _ in range(tries):
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+            )
+            break
+        except Exception:
+            time.sleep(retry_sleep)
+            traceback.print_exc()
+    time.sleep(prompt_sleep)
     return completion.choices[0].message.content
 
 
@@ -52,7 +59,7 @@ def prompt_check_cybersecurity_post(post: Post) -> bool:
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful categorization automaton capable of deciding if a post sent by the user is about some cybersecurity topic or some other subject. " +
+            "content": "You are a helpful categorization automaton capable of deciding if a post sent by the user is about some cybersecurity topic (including but not limited to tools, attacks, techniques, hacks, cybersecruity news, research, threat intelligence, vulnerabilities, exploits and service downtimes) or some other subject. " +
                        "You output only YES or NO and nothing else."
         }, {
             "role": "user",
