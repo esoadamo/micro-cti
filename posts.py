@@ -161,8 +161,11 @@ async def generate_tags() -> None:
 
 async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
     keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing', 'bypass', 'outage', 'steal', 'malicious', 'compromise'}
+    post_content = post.content_txt.lower()
+    # Remove all @usernames from the post content
+    post_content = re.sub(r'@\S+', '', post_content)
     for keyword in keywords_whitelist:
-        if keyword.lower() in post.content_txt.lower():
+        if keyword.lower() in post_content:
             return True
     db = await get_db()
     result = prompt_check_cybersecurity_post(post)
