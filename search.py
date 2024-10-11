@@ -102,7 +102,7 @@ def parse_query(query):
     return transformer.transform(tree)
 
 
-def evaluate_ast(ast: Union[list, dict], post: Post) -> float:
+def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> float:
     if isinstance(ast, dict):
         if "OR" in ast:
             # OR score is counted as sum of the children
@@ -113,7 +113,7 @@ def evaluate_ast(ast: Union[list, dict], post: Post) -> float:
         if "exact" in ast:
             # Exact match has 50 % penalty if not found
             phrase = ast["exact"]
-            return 1.0 if phrase.lower() in format_post_for_search(post) else 0.5
+            return 1.0 if phrase.lower() in format_post_for_search(post) else (0 if strict else 0.5)
         if "term" in ast:
             # Compare generic term
             term = ast["term"]
@@ -122,9 +122,9 @@ def evaluate_ast(ast: Union[list, dict], post: Post) -> float:
             match_source = re.match(r"(?:^|.*\s)source:(\S+).*", term)
 
             if match_user:
-                return 1 if post.user.lower().startswith(match_user.group(1).lower()) else 0.3
+                return 1 if post.user.lower().startswith(match_user.group(1).lower()) else (0 if strict else 0.3)
             if match_source:
-                return 1 if post.source.lower().startswith(match_source.group(1).lower()) else 0.3
+                return 1 if post.source.lower().startswith(match_source.group(1).lower()) else (0 if strict else 0.3)
 
             return 1
     elif isinstance(ast, list):
@@ -151,7 +151,7 @@ def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
             yield ast["term"]
     elif isinstance(ast, list):
         for child in ast:
-            yield from parse_search_terms(child, prefix)
+            yield from parse_search_terms(child)
 
 
 def format_post_for_search(post: Post) -> str:
@@ -170,6 +170,11 @@ async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[
     back_data = back_data if back_data is not None else {}
     back_data['time_start'] = time.time()
 
+    strict_search = False
+    if fulltext.startswith('!strict'):
+        strict_search = True
+        fulltext = fulltext[7:]
+
     db = await get_db()
     all_posts = await db.post.find_many(where={'is_hidden': False}, include={'tags': True})
     query = parse_query(fulltext)
@@ -177,11 +182,13 @@ async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[
     matched_ids_score = {}
 
     for term in parse_search_terms(query):
+        if not term.strip():
+            continue
         back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
         # noinspection PyUnresolvedReferences
-        matched = fuzzywuzzy.process.extract(fulltext, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
+        matched = fuzzywuzzy.process.extract(term, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
         for (post_id, post_content), score in matched:
-            matched_ids_score[post_id] = score
+            matched_ids_score[post_id] = max(matched_ids_score.get(post_id, 0), score)
     matched_posts = [post for post in all_posts if post.id in matched_ids_score]
 
     search_latest = datetime.now(tz=timezone.utc)
@@ -212,9 +219,10 @@ async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[
             matched_ids_score[post.id] *= 0.6
 
         # Adjust score according to the search query
-        matched_ids_score[post.id] *= evaluate_ast(parse_query(fulltext), post)
+        matched_ids_score[post.id] *= evaluate_ast(parse_query(fulltext), post, strict=strict_search)
 
-    matched_posts.sort(key=lambda x: matched_ids_score[x.id], reverse=True)
+    matched_posts = filter(lambda x: matched_ids_score[x.id] > 1, matched_posts)
+    matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)
     result = [(post, round(matched_ids_score[post.id])) for post in matched_posts]
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
