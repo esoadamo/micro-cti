@@ -59,7 +59,7 @@ def prompt_check_cybersecurity_post(post: Post) -> bool:
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful categorization automaton capable of deciding if a post sent by the user is about some cybersecurity topic (including but not limited to tools, attacks, techniques, hacks, cybersecruity news, research, threat intelligence, vulnerabilities, exploits and service downtimes) or some other subject. " +
+            "content": "You are a helpful categorization automaton capable of deciding if a post sent by the user is written in english and about some cybersecurity topic (including but not limited to tools, attacks, techniques, hacks, cybersecruity news, research, threat intelligence, vulnerabilities, exploits and service downtimes) or some other subject. " +
                        "You output only YES or NO and nothing else."
         }, {
             "role": "user",

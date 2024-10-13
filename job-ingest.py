@@ -1,10 +1,13 @@
 import asyncio
 
-from posts import generate_tags, get_mastodon_posts, get_airtable_posts
+from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts
 
 
 async def main() -> None:    
     print('[*] Fetching started')
+    async for post in get_bluesky_posts():
+        print('[-]', post)
+    print('[*] Bluesky fetched')
     async for post in get_airtable_posts():
         print('[-]', post)
     print('[*] Airtable fetched')
