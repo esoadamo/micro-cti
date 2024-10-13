@@ -6,7 +6,8 @@ from functools import reduce
 from statistics import mean
 from typing import List, Tuple, Union, Iterable, Optional
 
-import fuzzywuzzy
+import fuzzywuzzy.process
+import fuzzywuzzy.fuzz
 from lark import Lark, Transformer, v_args, ParseError
 from prisma.models import Post
 
@@ -185,7 +186,6 @@ async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[
         if not term.strip():
             continue
         back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
-        # noinspection PyUnresolvedReferences
         matched = fuzzywuzzy.process.extract(term, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
         for (post_id, post_content), score in matched:
             matched_ids_score[post_id] = max(matched_ids_score.get(post_id, 0), score)

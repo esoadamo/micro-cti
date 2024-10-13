@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/favicon.svg">
     <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/hack-font@3/build/web/hack-subset.css">
+    <script defer data-domain="ucti.app" src="https://tct.hlavacek.win/js/script.js"></script>
     <style>
     	* {
   	    	font-family: Hack, monospace;
@@ -45,8 +46,8 @@
     </style>
 </head>
 
-<form>
-    <input id="search" name="search" value="{{search_term|escape}}">
+<form action="/search">
+    <input id="search" name="q" value="{{search_term|escape}}" aria-label="Search term" placeholder="Search">
 </form>
 
 {% if error %}

@@ -20,9 +20,10 @@ def render_template(filename, request, **context):
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/search", response_class=HTMLResponse)
 async def app_search(request: Request) -> _TemplateResponse:
     time_start = time.time()
-    search_term = request.query_params.get('search', '')
+    search_term = request.query_params.get('q', '')
     posts = []
     search_back_data = {}
     error = ""
