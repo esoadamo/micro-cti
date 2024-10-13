@@ -11,7 +11,7 @@ generator db {
 
 model Post {
   id         Int @id @default(autoincrement())
-  source_id  BigInt?
+  source_id  String?
   source     String
   user       String
   created_at DateTime
