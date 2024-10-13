@@ -1,18 +1,16 @@
 import json
 import random
 import re
-from bs4 import BeautifulSoup
-import fuzzywuzzy.process
-import tomllib
 import time
+import tomllib
 from datetime import datetime, timezone, timedelta
-from typing import AsyncIterable, List, Optional, Tuple
-from prisma.models import Post
+from typing import AsyncIterable, Optional, Tuple
 
-import fuzzywuzzy
-from mastodon import Mastodon
-from mastodon.utility import AttribAccessList
+import atproto
 import pyairtable
+from bs4 import BeautifulSoup
+from mastodon import Mastodon
+from prisma.models import Post
 
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from db import get_db, json_serial
@@ -26,6 +24,11 @@ def get_mastodon_secrets() -> dict:
 def get_airtable_secrets() -> dict:
     with open("config.toml", 'rb') as f:
         return tomllib.load(f)["airtable"]
+
+
+def get_bluesky_secrets() -> dict:
+    with open("config.toml", 'rb') as f:
+        return tomllib.load(f)["bluesky"]
 
 
 def get_mastodon_instance() -> Mastodon:
@@ -45,6 +48,69 @@ def get_airtable_instance() -> pyairtable.Table:
     return api.table(secrets["base_id"], secrets["table_id"])
 
 
+# noinspection PyDefaultArgument
+def get_bluesky_instance(cache = {}) -> Tuple[atproto.Client, list[str]]:
+    if 'client' not in cache:
+        secrets = get_bluesky_secrets()
+        client = atproto.Client()
+        client.login(secrets['handle'], secrets['app_password'])
+        cache['client'] = client
+        cache['feeds'] = secrets['feeds']
+    return cache['client'], cache['feeds']
+
+
+async def get_bluesky_posts() -> AsyncIterable[any]:
+    client, feeds = get_bluesky_instance()
+    db = await get_db()
+    min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
+    max_post = await db.post.find_first(where={'source': 'bluesky'}, order={'created_at': 'desc'})
+    if max_post is not None:
+        min_time = max_post.created_at
+
+    for feed in feeds:
+        fetch_next_page = True
+        cursor = ''
+        while fetch_next_page:
+            data = client.app.bsky.feed.get_feed({
+                'feed': feed,
+                'limit': 50,
+                'cursor': cursor
+            }, headers={'Accept-Language': 'en'})
+            time.sleep(10)
+            cursor = data.cursor
+            for b_post in data.feed:
+                user = b_post.post.author.handle
+                content_txt = b_post.post.record.text
+                created_at = datetime.fromisoformat(b_post.post.record.created_at)
+                source = "bluesky"
+                source_id = b_post.post.cid
+                url = f"https://bsky.app/profile/{user}/post/{b_post.post.uri.split('/')[-1]}"
+                raw = dict(b_post)
+                raw["$feed"] = feed
+
+                if created_at < min_time:
+                    fetch_next_page = False
+                    break
+
+                if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                    # noinspection PyTypeChecker
+                    post = await db.post.create({
+                        'source': source,
+                        'source_id': source_id,
+                        'user': user,
+                        'url': url,
+                        'created_at': created_at,
+                        'fetched_at': datetime.now(tz=timezone.utc),
+                        'content_html': content_txt,
+                        'content_txt': content_txt,
+                        'is_hidden': len(content_txt.split()) < 3,
+                        'raw': json.dumps(raw, default=dict)
+                    })
+                    if not post.is_hidden:
+                        await hide_post_if_not_about_cybersecurity(post)
+                    yield await db.post.find_unique(where={'id': post.id})
+
+
 async def get_airtable_posts() -> AsyncIterable[Post]:
     airtable = get_airtable_instance()
     db = await get_db()
@@ -59,7 +125,7 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
             content_text = content_html = record_fields["Content"]
             url = record_fields["Link"]
             source = record_fields["Source"]
-            source_id = record_fields["Id"]
+            source_id = str(record_fields["Id"])
             raw = json.dumps(record_fields)
         except KeyError:
             continue
@@ -85,8 +151,8 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
 
 async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
     if min_id is None:
-        max_post = await (await get_db()).post.find_first(where={'source': 'mastodon'}, order={'source_id': 'desc'})
-        min_id = max_post.id if max_post is not None else None
+        max_post = await (await get_db()).post.find_first(where={'source': 'mastodon'}, order={'created_at': 'desc'})
+        min_id = int(max_post.source_id) if max_post is not None else None
 
     mastodon = get_mastodon_instance()
 
@@ -106,10 +172,11 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                     content_text = BeautifulSoup(content_html, "html.parser").get_text(separator="", strip=True)
                     content_text = re.sub(r'#\s+(\w)', r'#\1', content_text)
                     db = await get_db()
-                    if not await db.post.find_first(where={'source': 'mastodon', 'source_id': post['id']}):
+                    source_id = str(post['id'])
+                    if not await db.post.find_first(where={'source': 'mastodon', 'source_id': source_id}):
                         post = await db.post.create({
                             'source': 'mastodon',
-                            'source_id': post['id'],
+                            'source_id': source_id,
                             'user': post['account']['acct'],
                             'url': post['url'] or post['uri'],
                             'created_at': post['created_at'],
