@@ -30,7 +30,7 @@ async def app_search(request: Request) -> _TemplateResponse:
 
     if search_term:
         try:
-            posts = await search_posts(search_term, search_back_data)
+            posts = await search_posts(search_term, back_data=search_back_data)
         except ParseError as e:
             error = str(e)
 

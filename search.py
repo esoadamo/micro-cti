@@ -1,6 +1,8 @@
 import itertools
 import re
 import time
+import multiprocessing
+from functools import partial
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from statistics import mean
@@ -107,7 +109,7 @@ def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> fl
     if isinstance(ast, dict):
         if "OR" in ast:
             # OR score is counted as sum of the children
-            return sum(evaluate_ast(child, post) for child in ast["OR"])
+            return sum([evaluate_ast(child, post) for child in ast["OR"]])
         if "AND" in ast:
             # AND score is counted as product of the children
             return reduce(lambda a, b: a * b, [evaluate_ast(child, post) for child in ast["AND"]])
@@ -131,7 +133,9 @@ def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> fl
     elif isinstance(ast, list):
         # Mean of all children
         return mean(evaluate_ast(item, post) for item in ast)
-    return 1
+
+    # Ignore search Tokens such as AND and OR
+    return 0
 
 
 def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
@@ -167,7 +171,11 @@ def format_post_for_search(post: Post) -> str:
     ])
 
 
-async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
+def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tuple[int, int]:
+    return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
+
+
+async def search_posts(fulltext: str, count: int = 40, min_score: int = 30, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
     back_data = back_data if back_data is not None else {}
     back_data['time_start'] = time.time()
 
@@ -186,9 +194,16 @@ async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[
         if not term.strip():
             continue
         back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
-        matched = fuzzywuzzy.process.extract(term, post_contents, limit=40, scorer=fuzzywuzzy.fuzz.token_set_ratio)
-        for (post_id, post_content), score in matched:
+        scorer = partial(post_fulltext_score, search_term=term)
+
+        with multiprocessing.Pool(processes=1) as p:
+            post_scores = p.starmap_async(scorer, post_contents, chunksize=200).get(timeout=10)
+
+        for post_id, score in post_scores:
+            if score < min_score:
+                continue
             matched_ids_score[post_id] = max(matched_ids_score.get(post_id, 0), score)
+
     matched_posts = [post for post in all_posts if post.id in matched_ids_score]
 
     search_latest = datetime.now(tz=timezone.utc)
@@ -221,8 +236,8 @@ async def search_posts(fulltext: str, back_data: Optional[dict] = None) -> List[
         # Adjust score according to the search query
         matched_ids_score[post.id] *= evaluate_ast(parse_query(fulltext), post, strict=strict_search)
 
-    matched_posts = filter(lambda x: matched_ids_score[x.id] > 1, matched_posts)
-    matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)
+    matched_posts = filter(lambda x: matched_ids_score[x.id] >= min_score, matched_posts)
+    matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)[:count]
     result = [(post, round(matched_ids_score[post.id])) for post in matched_posts]
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
