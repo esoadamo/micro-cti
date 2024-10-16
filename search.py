@@ -105,14 +105,14 @@ def parse_query(query):
     return transformer.transform(tree)
 
 
-def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> float:
+def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> Optional[float]:
     if isinstance(ast, dict):
         if "OR" in ast:
             # OR score is counted as sum of the children
-            return sum([evaluate_ast(child, post) for child in ast["OR"]])
+            return max(filter(lambda x: x is not None, [evaluate_ast(child, post) for child in ast["OR"]]))
         if "AND" in ast:
             # AND score is counted as product of the children
-            return reduce(lambda a, b: a * b, [evaluate_ast(child, post) for child in ast["AND"]])
+            return min(filter(lambda x: x is not None, [evaluate_ast(child, post) for child in ast["AND"]]))
         if "exact" in ast:
             # Exact match has 50 % penalty if not found
             phrase = ast["exact"]
@@ -134,8 +134,8 @@ def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> fl
         # Mean of all children
         return mean(evaluate_ast(item, post) for item in ast)
 
-    # Ignore search Tokens such as AND and OR
-    return 0
+    # Ignore search Tokens such as AND, OR
+    return None
 
 
 def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
@@ -175,7 +175,7 @@ def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tu
     return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
 
 
-async def search_posts(fulltext: str, count: int = 40, min_score: int = 30, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
+async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
     back_data = back_data if back_data is not None else {}
     back_data['time_start'] = time.time()
 
@@ -195,9 +195,7 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 30, back
             continue
         back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
         scorer = partial(post_fulltext_score, search_term=term)
-
-        with multiprocessing.Pool(processes=1) as p:
-            post_scores = p.starmap_async(scorer, post_contents, chunksize=200).get(timeout=10)
+        post_scores = itertools.starmap(scorer, post_contents)
 
         for post_id, score in post_scores:
             if score < min_score:
