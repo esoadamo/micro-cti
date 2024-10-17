@@ -1,7 +1,8 @@
 import itertools
 import re
 import time
-import multiprocessing
+import asyncio
+from math import floor, ceil
 from functools import partial
 from datetime import datetime, timedelta, timezone
 from functools import reduce
@@ -175,7 +176,16 @@ def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tu
     return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
 
 
+async def fetch_posts_partial(part: int, parts: int, post_max_id: int) -> List[Post]:
+    db = await get_db()
+    min_q_id = ceil(post_max_id * (part - 1 ) / parts)
+    max_q_id = floor(post_max_id * part / parts)
+    posts = await db.post.find_many(where={'is_hidden': False, 'id': {'gte': min_q_id, 'lte': max_q_id}}, include={'tags': True})
+    return posts
+
+
 async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
+    print(f"[*] Search started {fulltext=} {count=} {min_score=}")
     back_data = back_data if back_data is not None else {}
     back_data['time_start'] = time.time()
 
@@ -185,14 +195,23 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
         fulltext = fulltext[7:]
 
     db = await get_db()
-    all_posts = await db.post.find_many(where={'is_hidden': False}, include={'tags': True})
+    post_max_id = (await db.post.find_first(order={'id': 'desc'})).id
+    post_fetch_parts = 32
+
+    all_posts = []
+    for posts in await asyncio.gather(*[fetch_posts_partial(x + 1, post_fetch_parts, post_max_id) for x in range(post_fetch_parts)]):
+        all_posts.extend(posts)
+
+    back_data['time_goal_db'] = time.time()
     query = parse_query(fulltext)
     post_contents = [(post.id, format_post_for_search(post)) for post in all_posts]
+    back_data['time_goal_content'] = time.time()
     matched_ids_score = {}
 
     for term in parse_search_terms(query):
         if not term.strip():
             continue
+        print(f'[*] subsearch {term=}')
         back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
         scorer = partial(post_fulltext_score, search_term=term)
         post_scores = itertools.starmap(scorer, post_contents)
@@ -201,8 +220,10 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
             if score < min_score:
                 continue
             matched_ids_score[post_id] = max(matched_ids_score.get(post_id, 0), score)
+    back_data['time_goal_fulltext'] = time.time()
 
     matched_posts = [post for post in all_posts if post.id in matched_ids_score]
+    back_data['time_goal_matched'] = time.time()
 
     search_latest = datetime.now(tz=timezone.utc)
     search_earliest = search_latest - timedelta(days=7)
@@ -233,10 +254,19 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
 
         # Adjust score according to the search query
         matched_ids_score[post.id] *= evaluate_ast(parse_query(fulltext), post, strict=strict_search)
+    back_data['time_goal_eval'] = time.time()
 
     matched_posts = filter(lambda x: matched_ids_score[x.id] >= min_score, matched_posts)
     matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)[:count]
     result = [(post, round(matched_ids_score[post.id])) for post in matched_posts]
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
+    
+    print(f'[*] Search time DB {int(-1000 * (back_data["time_start"] - back_data["time_goal_db"]))}ms')
+    print(f'[*] Search time contents {int(-1000 * (back_data["time_goal_db"] - back_data["time_goal_content"]))}ms')
+    print(f'[*] Search time fulltext {int(-1000 * (back_data["time_goal_content"] - back_data["time_goal_fulltext"]))}ms')
+    print(f'[*] Search time matched {int(-1000 * (back_data["time_goal_fulltext"] - back_data["time_goal_matched"]))}ms')
+    print(f'[*] Search time eval {int(-1000 * (back_data["time_goal_matched"] - back_data["time_goal_eval"]))}ms')
+    print(f'[*] Search time end {int(-1000 * (back_data["time_goal_eval"] - back_data["time_end"]))}ms')
+    
     return result
