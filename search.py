@@ -194,6 +194,25 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     back_data['time_start'] = time.time()
 
     strict_search = False
+
+    for command, param in (('strict', None), ('min_score', r'\d+'), ('count', f'\d+')):
+        command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
+        command_search = re.match(command_re, fulltext)
+        if not command_search:
+            continue
+        param_value = command_search.group(2) if param else None
+        fulltext = f"{command_search.group(1)} {command_search.group(3 if param else 2)}".strip()
+        match command:
+            case "strict":
+                strict_search = True
+            case "min_score":
+                min_score = int(param_value)
+            case "count":
+                count = min(int(param_value), 100)
+
+    fulltext = re.sub(r"\s+", " ", fulltext)
+    print(f"[*] Search commands {fulltext=} {strict_search=} {min_score=} {count=}")
+    
     if fulltext.startswith('!strict'):
         strict_search = True
         fulltext = fulltext[7:]
