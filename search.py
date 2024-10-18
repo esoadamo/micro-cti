@@ -110,30 +110,34 @@ def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> Op
     if isinstance(ast, dict):
         if "OR" in ast:
             # OR score is counted as sum of the children
-            return max(filter(lambda x: x is not None, [evaluate_ast(child, post) for child in ast["OR"]]))
+            child_scores = list(filter(lambda x: x is not None, [evaluate_ast(child, post) for child in ast["OR"]]))
+            return max(child_scores) if child_scores else 1
         if "AND" in ast:
             # AND score is counted as product of the children
-            return min(filter(lambda x: x is not None, [evaluate_ast(child, post) for child in ast["AND"]]))
+            child_scores = list(filter(lambda x: x is not None, [evaluate_ast(child, post) for child in ast["AND"]]))
+            return min(child_scores) if child_scores else 1
         if "exact" in ast:
             # Exact match has 50 % penalty if not found
-            phrase = ast["exact"]
-            return 1.0 if phrase.lower() in format_post_for_search(post) else (0 if strict else 0.5)
+            phrase = ast["exact"].lower().strip()
+            return 1.0 if phrase in format_post_for_search(post) else (0 if strict else 0.5)
         if "term" in ast:
             # Compare generic term
-            term = ast["term"]
+            term = ast["term"].lower().strip()
+            term_score = 1
 
             match_user = re.match(r"(?:^|.*\s)user:(\S+).*", term)
             match_source = re.match(r"(?:^|.*\s)source:(\S+).*", term)
+            selector_applied = match_source or match_user
 
             if match_user:
-                return 1 if post.user.lower().startswith(match_user.group(1).lower()) else (0 if strict else 0.3)
+                term_score *= 1 if post.user.lower().startswith(match_user.group(1)) else (0 if strict else 0.3)
             if match_source:
-                return 1 if post.source.lower().startswith(match_source.group(1).lower()) else (0 if strict else 0.3)
+                term_score *= 1 if post.source.lower().startswith(match_source.group(1)) else (0 if strict else 0.3)
 
-            return 1
+            return term_score if selector_applied else None
     elif isinstance(ast, list):
         # Mean of all children
-        return mean(evaluate_ast(item, post) for item in ast)
+        return mean(filter(lambda x: x is not None, [evaluate_ast(item, post) for item in ast]))
 
     # Ignore search Tokens such as AND, OR
     return None
