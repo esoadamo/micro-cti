@@ -276,7 +276,8 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
             matched_ids_score[post.id] *= 0.6
 
         # Adjust score according to the search query
-        matched_ids_score[post.id] *= evaluate_ast(parse_query(fulltext), post, strict=strict_search)
+        post_score_adjustment = evaluate_ast(parse_query(fulltext), post, strict=strict_search)
+        matched_ids_score[post.id] *= post_score_adjustment if post_score_adjustment is not None else 1
     back_data['time_goal_eval'] = time.time()
 
     matched_posts = filter(lambda x: matched_ids_score[x.id] >= min_score, matched_posts)

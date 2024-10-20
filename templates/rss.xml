@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+    <channel>
+        <title>MicroCTI Search</title>
+        <description>Query: {{search_term|escape}}</description>
+        <link>{{url}}/</link>
+        <lastBuildDate>{{ format_rfc2822(latest_ingestion_time) }}</lastBuildDate>
+        {% for (post, score) in posts %}
+        <item>
+            <title>{{ post.content_txt[:120]|escape }}... ({{score}})</title>
+            <description>{{ post.content_txt[:120]|escape }}... ({{post.source|escape}}:{{post.user|escape}}, {{post.created_at}}, {{score}})</description>
+            <pubDate>{{ format_rfc2822(post.created_at) }}</pubDate>
+            <link>{{ post.url }}</link>
+            <guid isPermaLink="true">{{ post.url }}</guid>
+            {% for tag in post.tags %}
+            <category>{{ tag.name[1:] | escape }}</category>
+            {% endfor %}
+        </item>
+        {% endfor %}
+    </channel>
+</rss>
