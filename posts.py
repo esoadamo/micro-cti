@@ -49,7 +49,7 @@ def get_airtable_instance() -> pyairtable.Table:
 
 
 # noinspection PyDefaultArgument
-def get_bluesky_instance(cache = {}) -> Tuple[atproto.Client, list[str]]:
+def get_bluesky_instance(cache={}) -> Tuple[atproto.Client, list[str]]:
     if 'client' not in cache:
         secrets = get_bluesky_secrets()
         client = atproto.Client()
@@ -159,7 +159,7 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
     ended = False
     end_date = datetime(2024, 7, 1, tzinfo=timezone.utc)
     max_id = None
-    
+
     while not ended:
         timeline = mastodon.timeline_home(min_id=min_id, max_id=max_id)
         if not timeline:
@@ -196,11 +196,12 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
 
         max_id = timeline[-1]['id']
         if not ended:
-            print('[*] Fetched posts up to', timeline[-1]['created_at'], f'got {mastodon.ratelimit_remaining} requests left')
+            print('[*] Fetched posts up to', timeline[-1]['created_at'],
+                  f'got {mastodon.ratelimit_remaining} requests left')
             if mastodon.ratelimit_remaining <= 1:
                 sleep_time = max(0, mastodon.ratelimit_reset - time.time())
                 print(f'[*] Ratelimit reached, sleeping for {sleep_time} s until {mastodon.ratelimit_reset}')
-                time.sleep(sleep_time)            
+                time.sleep(sleep_time)
             time.sleep(1)
 
 
@@ -208,7 +209,7 @@ async def generate_tags() -> None:
     db = await get_db()
     untagged_posts = await db.post.find_many(where={'tags_assigned': False, 'is_hidden': False})
     print(f'[*] found {len(untagged_posts)} posts to tag')
-    
+
     for i, post in enumerate(untagged_posts):
         print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
         post_content = post.content_txt
@@ -222,12 +223,16 @@ async def generate_tags() -> None:
         tag_names = {x.upper() for x in tag_names}
         print("[-]", tag_names)
 
-        tags = [await db.tag.upsert(where={"name": tag_name}, data={'create': {"name": tag_name, "color": generate_random_color()}, 'update': {}}) for tag_name in tag_names]
-        await db.post.update(where={'id': post.id}, data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
+        tags = [await db.tag.upsert(where={"name": tag_name},
+                                    data={'create': {"name": tag_name, "color": generate_random_color()}, 'update': {}})
+                for tag_name in tag_names]
+        await db.post.update(where={'id': post.id},
+                             data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
 
 
 async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
-    keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing', 'bypass', 'outage', 'steal', 'malicious', 'compromise'}
+    keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing',
+                          'bypass', 'outage', 'steal', 'malicious', 'compromise'}
     post_content = post.content_txt.lower()
     # Remove all @usernames from the post content
     post_content = re.sub(r'@\S+', '', post_content)
@@ -255,7 +260,7 @@ def generate_random_color():
 
     # Convert HSL to RGB
     r, g, b = hsl_to_rgb(h, s, l)
-    
+
     # Convert RGB to hex
     return f'#{int(r):02X}{int(g):02X}{int(b):02X}'
 
