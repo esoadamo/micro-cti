@@ -19,9 +19,9 @@ from db import get_db
 SEARCH_GRAMMAR = r"""
 ?start: expr
 
-?expr: expr term   -> or_expr
+?expr: expr term   -> and_expr
      | expr_explicit
-     
+
 ?expr_explicit: expr OR term   -> or_expr
      | term
 
@@ -137,7 +137,7 @@ def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> Op
             return term_score if selector_applied else None
     elif isinstance(ast, list):
         # Mean of all children
-        return mean(filter(lambda x: x is not None, [evaluate_ast(item, post) for item in ast]))
+        return min(filter(lambda x: x is not None, [evaluate_ast(item, post) for item in ast]))
 
     # Ignore search Tokens such as AND, OR
     return None
@@ -195,7 +195,7 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
 
     strict_search = False
 
-    for command, param in (('strict', None), ('min_score', r'\d+'), ('count', f'\d+')):
+    for command, param in (('strict', None), ('min_score', r'\d+'), ('count', r'\d+')):
         command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
         command_search = re.match(command_re, fulltext)
         if not command_search:
