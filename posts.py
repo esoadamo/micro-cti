@@ -4,9 +4,10 @@ import re
 import time
 import tomllib
 from datetime import datetime, timezone, timedelta
-from typing import AsyncIterable, Optional, Tuple
+from typing import AsyncIterable, Optional, Tuple, List
 
 import atproto
+import feedparser
 import pyairtable
 from bs4 import BeautifulSoup
 from mastodon import Mastodon
@@ -30,6 +31,15 @@ def get_airtable_secrets() -> dict:
 def get_bluesky_secrets() -> dict:
     with open("config.toml", 'rb') as f:
         return tomllib.load(f)["bluesky"]
+
+
+def get_rss_feeds() -> List[dict]:
+    with open("config.toml", 'rb') as f:
+        try:
+            feeds = tomllib.load(f)["rss"]
+            return list(feeds.values())
+        except KeyError:
+            return []
 
 
 def get_mastodon_instance() -> Mastodon:
@@ -58,6 +68,58 @@ def get_bluesky_instance(cache={}) -> Tuple[atproto.Client, list[str]]:
         cache['client'] = client
         cache['feeds'] = secrets['feeds']
     return cache['client'], cache['feeds']
+
+
+def read_html(content: str) -> str:
+    parser = BeautifulSoup(content, "html.parser")
+    text = parser.get_text(separator=" ", strip=True)
+    for img in parser.find_all('img'):
+        text += ' ' + img.get('alt', '')
+    text = re.sub(r'\s+', ' ', text)
+    # Fix links where there is space between http and ://, e.g. "http ://example.com"
+    text = re.sub(r'(https?)\s*:\s*//', r'\1://', text)
+    # Fix spaces before hashtags
+    text = re.sub(r'#\s+(\w)', r'#\1', text)
+    return text.strip()
+
+
+async def get_rss_posts() -> AsyncIterable[Post]:
+    feeds = get_rss_feeds()
+    for feed in feeds:
+        source = feed['name']
+
+        max_post = await (await get_db()).post.find_first(where={'source': source}, order={'created_at': 'desc'})
+        min_post_time = max_post.created_at if max_post else datetime.now(tz=timezone.utc) - timedelta(days=1)
+
+        for rss_post in feedparser.parse(feed['url']).entries:
+            created_at = datetime.fromisoformat(rss_post.published)
+
+            if created_at < min_post_time:
+                continue
+
+            source_id = rss_post.link
+            url = rss_post.link
+            content_html = rss_post.summary
+            content_txt = read_html(content_html)
+            db = await get_db()
+            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                post = await db.post.create({
+                    'source': source,
+                    'source_id': source_id,
+                    'user': rss_post.author,
+                    'url': url,
+                    'created_at': created_at,
+                    'fetched_at': datetime.now(tz=timezone.utc),
+                    'content_html': content_html,
+                    'content_txt': content_txt,
+                    'is_hidden': len(content_txt.split()) < 3,
+                    'raw': json.dumps(rss_post, default=json_serial)
+                })
+                if not post.is_hidden:
+                    await hide_post_if_not_about_cybersecurity(post)
+                if not post.is_hidden:
+                    await format_post_for_search(post, regenerate=True)
+                yield await db.post.find_unique(where={'id': post.id})
 
 
 async def get_bluesky_posts() -> AsyncIterable[any]:
@@ -174,8 +236,7 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
             if post['created_at'] > end_date:
                 if save:
                     content_html = post["content"]
-                    content_text = BeautifulSoup(content_html, "html.parser").get_text(separator="", strip=True)
-                    content_text = re.sub(r'#\s+(\w)', r'#\1', content_text)
+                    content_text = read_html(content_html)
                     db = await get_db()
                     source_id = str(post['id'])
                     if not await db.post.find_first(where={'source': 'mastodon', 'source_id': source_id}):
@@ -235,6 +296,7 @@ async def generate_tags() -> None:
                 for tag_name in tag_names]
         await db.post.update(where={'id': post.id},
                              data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
+        await format_post_for_search(post, regenerate=True)
 
 
 async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
