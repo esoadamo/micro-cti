@@ -14,6 +14,7 @@ from prisma.models import Post
 
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from db import get_db, json_serial
+from search import format_post_for_search
 
 
 def get_mastodon_secrets() -> dict:
@@ -108,6 +109,8 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
                     })
                     if not post.is_hidden:
                         await hide_post_if_not_about_cybersecurity(post)
+                    if not post.is_hidden:
+                        await format_post_for_search(post, regenerate=True)
                     yield await db.post.find_unique(where={'id': post.id})
 
 
@@ -145,6 +148,8 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
             })
             if not post.is_hidden:
                 await hide_post_if_not_about_cybersecurity(post)
+            if not post.is_hidden:
+                await format_post_for_search(post, regenerate=True)
             yield await db.post.find_unique(where={'id': post.id})
         airtable.delete(record_id)
 
@@ -188,6 +193,8 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                         })
                         if not post.is_hidden:
                             await hide_post_if_not_about_cybersecurity(post)
+                        if not post.is_hidden:
+                            await format_post_for_search(post, regenerate=True)
                         yield await db.post.find_unique(where={'id': post.id})
             else:
                 ended = True

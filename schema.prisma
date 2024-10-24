@@ -10,24 +10,25 @@ generator db {
 }
 
 model Post {
-  id         Int @id @default(autoincrement())
-  source_id  String?
-  source     String
-  user       String
-  created_at DateTime
-  fetched_at DateTime
-  url        String
-  content_html    String
-  content_txt     String
-  raw             String
-  tags_assigned   Boolean @default(false)
-  is_hidden       Boolean @default(false)
-  tags        Tag[]    @relation("PostTags")
+  id             Int      @id @default(autoincrement())
+  source_id      String?
+  source         String
+  user           String
+  created_at     DateTime
+  fetched_at     DateTime
+  url            String
+  content_html   String
+  content_txt    String
+  content_search String?
+  raw            String
+  tags_assigned  Boolean  @default(false)
+  is_hidden      Boolean  @default(false)
+  tags           Tag[]    @relation("PostTags")
 }
 
 model Tag {
-  id   Int   @id @default(autoincrement())
-  name String   @unique
-  color String  @default("#000")
-  posts Post[]  @relation("PostTags")
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  color String @default("#000")
+  posts Post[] @relation("PostTags")
 }
