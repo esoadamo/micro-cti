@@ -9,4 +9,4 @@ RUN prisma generate
 
 COPY . /app
 
-CMD ["fastapi", "run", "web.py", "--port", "80"]
+CMD ["fastapi", "run", "web.py", "--port", "80", "--workers", "4", "--proxy-headers"]
