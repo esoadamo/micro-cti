@@ -1,17 +1,16 @@
+import asyncio
 import itertools
 import re
 import time
-import asyncio
-from math import floor, ceil
-from functools import partial
 from datetime import datetime, timedelta, timezone
-from functools import reduce
-from statistics import mean
+from functools import partial
+from math import floor, ceil
 from typing import List, Tuple, Union, Iterable, Optional
 
-import fuzzywuzzy.process
 import fuzzywuzzy.fuzz
+import fuzzywuzzy.process
 from lark import Lark, Transformer, v_args, ParseError
+from prisma.bases import BasePost
 from prisma.models import Post
 
 from db import get_db
@@ -47,7 +46,13 @@ WORD: /[^\s()]+/
 """
 
 
-parser = Lark(SEARCH_GRAMMAR, start='start', parser='lalr')
+SEARCH_PARSER = Lark(SEARCH_GRAMMAR, start='start', parser='lalr')
+SEARCH_FETCH_JOBS = 64
+
+
+class PostSearchable(BasePost):
+    id: int
+    content_search: Optional[str]
 
 
 @v_args(inline=True)
@@ -99,7 +104,7 @@ class QueryTransformer(Transformer):
 
 def parse_query(query):
     try:
-        tree = parser.parse(query)
+        tree = SEARCH_PARSER.parse(query)
     except Exception as e:
         raise ParseError(f"Invalid query syntax: {e}")
     transformer = QueryTransformer()
@@ -119,7 +124,7 @@ def evaluate_ast(ast: Union[list, dict], post: Post, strict: bool = False) -> Op
         if "exact" in ast:
             # Exact match has 50 % penalty if not found
             phrase = ast["exact"].lower().strip()
-            return 1.0 if phrase in format_post_for_search(post) else (0 if strict else 0.5)
+            return 1.0 if phrase in post.content_search else (0 if strict else 0.5)
         if "term" in ast:
             # Compare generic term
             term = ast["term"].lower().strip()
@@ -164,9 +169,13 @@ def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
             yield from parse_search_terms(child)
 
 
-def format_post_for_search(post: Post) -> str:
+async def format_post_for_search(post: Union[PostSearchable, Post], regenerate: bool = False) -> str:
+    if not regenerate and post.content_search:
+        return post.content_search
+    db = await get_db()
+    post = await db.post.find_unique(where={'id': post.id}, include={'tags': True})
     tags = ' '.join([x.name[1:] for x in post.tags])
-    return ' '.join([
+    content_search = ' '.join([
         post.content_txt,
         tags,
         f"{post.source}:{post.source}",
@@ -174,17 +183,19 @@ def format_post_for_search(post: Post) -> str:
         f"user:{post.user}",
         post.created_at.isoformat()
     ])
+    await db.post.update(where={'id': post.id}, data={'content_search': content_search})
+    return content_search
 
 
 def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tuple[int, int]:
     return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
 
 
-async def fetch_posts_partial(part: int, parts: int, post_max_id: int) -> List[Post]:
+async def fetch_posts_partial(part: int, parts: int, post_max_id: int) -> List[PostSearchable]:
     db = await get_db()
     min_q_id = ceil(post_max_id * (part - 1 ) / parts)
     max_q_id = floor(post_max_id * part / parts)
-    posts = await db.post.find_many(where={'is_hidden': False, 'id': {'gte': min_q_id, 'lte': max_q_id}}, include={'tags': True})
+    posts = await PostSearchable.prisma(client=db).find_many(where={'is_hidden': False, 'id': {'gte': min_q_id, 'lte': max_q_id}})
     return posts
 
 
@@ -219,15 +230,14 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
 
     db = await get_db()
     post_max_id = (await db.post.find_first(order={'id': 'desc'})).id
-    post_fetch_parts = 32
 
-    all_posts = []
-    for posts in await asyncio.gather(*[fetch_posts_partial(x + 1, post_fetch_parts, post_max_id) for x in range(post_fetch_parts)]):
+    all_posts: List[PostSearchable] = []
+    for posts in await asyncio.gather(*[fetch_posts_partial(x + 1, SEARCH_FETCH_JOBS, post_max_id) for x in range(SEARCH_FETCH_JOBS)]):
         all_posts.extend(posts)
 
     back_data['time_goal_db'] = time.time()
     query = parse_query(fulltext)
-    post_contents = [(post.id, format_post_for_search(post)) for post in all_posts]
+    post_contents = [(post.id, await format_post_for_search(post)) for post in all_posts]
     back_data['time_goal_content'] = time.time()
     matched_ids_score = {}
 
@@ -245,7 +255,8 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
             matched_ids_score[post_id] = max(matched_ids_score.get(post_id, 0), score)
     back_data['time_goal_fulltext'] = time.time()
 
-    matched_posts = [post for post in all_posts if post.id in matched_ids_score]
+    matched_posts = await db.post.find_many(where={'id': {'in': list(matched_ids_score.keys())}}, include={'tags': True})
+
     back_data['time_goal_matched'] = time.time()
 
     search_latest = datetime.now(tz=timezone.utc)
