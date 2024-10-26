@@ -4,6 +4,7 @@ import re
 import time
 import tomllib
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from typing import AsyncIterable, Optional, Tuple, List
 
 import atproto
@@ -16,6 +17,12 @@ from prisma.models import Post
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from db import get_db, json_serial
 from search import format_post_for_search
+
+
+class FetchError(Exception):
+    def __init__(self, message: str, source: List[Exception]):
+        super().__init__(message)
+        self.source = source
 
 
 def get_mastodon_secrets() -> dict:
@@ -85,218 +92,250 @@ def read_html(content: str) -> str:
 
 async def get_rss_posts() -> AsyncIterable[Post]:
     feeds = get_rss_feeds()
+    exceptions = []
     for feed in feeds:
-        source = feed['name']
+        # noinspection PyBroadException
+        try:
+            time.sleep(1)
+            source = feed['name']
 
-        max_post = await (await get_db()).post.find_first(where={'source': source}, order={'created_at': 'desc'})
-        min_post_time = max_post.created_at if max_post else datetime.now(tz=timezone.utc) - timedelta(days=1)
+            max_post = await (await get_db()).post.find_first(where={'source': source}, order={'created_at': 'desc'})
+            min_post_time = max_post.created_at if max_post else datetime.now(tz=timezone.utc) - timedelta(days=1)
 
-        for rss_post in feedparser.parse(feed['url']).entries:
-            created_at = datetime.fromisoformat(rss_post.published)
+            for rss_post in feedparser.parse(feed['url']).entries:
+                try:
+                    created_at = datetime.fromisoformat(rss_post.published)
+                except ValueError:
+                    created_at = parsedate_to_datetime(rss_post.published)
 
-            if created_at < min_post_time:
-                continue
+                if created_at < min_post_time:
+                    continue
 
-            source_id = rss_post.link
-            url = rss_post.link
-            content_html = rss_post.summary
-            content_txt = read_html(content_html)
-            db = await get_db()
-            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                post = await db.post.create({
-                    'source': source,
-                    'source_id': source_id,
-                    'user': rss_post.author,
-                    'url': url,
-                    'created_at': created_at,
-                    'fetched_at': datetime.now(tz=timezone.utc),
-                    'content_html': content_html,
-                    'content_txt': content_txt,
-                    'is_hidden': len(content_txt.split()) < 3,
-                    'raw': json.dumps(rss_post, default=json_serial)
-                })
-                if not post.is_hidden:
-                    await hide_post_if_not_about_cybersecurity(post)
-                if not post.is_hidden:
-                    await format_post_for_search(post, regenerate=True)
-                yield await db.post.find_unique(where={'id': post.id})
-
-
-async def get_bluesky_posts() -> AsyncIterable[any]:
-    client, feeds = get_bluesky_instance()
-    db = await get_db()
-    min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
-    max_post = await db.post.find_first(where={'source': 'bluesky'}, order={'created_at': 'desc'})
-    if max_post is not None:
-        min_time = max_post.created_at
-
-    for feed in feeds:
-        fetch_next_page = True
-        cursor = ''
-        while fetch_next_page:
-            data = client.app.bsky.feed.get_feed({
-                'feed': feed,
-                'limit': 50,
-                'cursor': cursor
-            }, headers={'Accept-Language': 'en'})
-            time.sleep(10)
-            cursor = data.cursor
-            for b_post in data.feed:
-                user = b_post.post.author.handle
-                content_txt = b_post.post.record.text
-                created_at = datetime.fromisoformat(b_post.post.record.created_at)
-                source = "bluesky"
-                source_id = b_post.post.cid
-                url = f"https://bsky.app/profile/{user}/post/{b_post.post.uri.split('/')[-1]}"
-                raw = dict(b_post)
-                raw["$feed"] = feed
-
-                if created_at < min_time:
-                    fetch_next_page = False
-                    break
-
+                source_id = rss_post.link
+                url = rss_post.link
+                content_html = rss_post.title + " " + rss_post.summary
+                content_txt = read_html(content_html)
+                db = await get_db()
                 if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                    # noinspection PyTypeChecker
                     post = await db.post.create({
                         'source': source,
                         'source_id': source_id,
-                        'user': user,
+                        'user': rss_post.author,
                         'url': url,
                         'created_at': created_at,
                         'fetched_at': datetime.now(tz=timezone.utc),
-                        'content_html': content_txt,
+                        'content_html': content_html,
                         'content_txt': content_txt,
                         'is_hidden': len(content_txt.split()) < 3,
-                        'raw': json.dumps(raw, default=dict)
+                        'raw': json.dumps(rss_post, default=json_serial)
                     })
                     if not post.is_hidden:
                         await hide_post_if_not_about_cybersecurity(post)
                     if not post.is_hidden:
                         await format_post_for_search(post, regenerate=True)
                     yield await db.post.find_unique(where={'id': post.id})
+        except Exception as e:
+            exceptions.append(e)
+    if exceptions:
+        raise FetchError("Error fetching RSS feeds", exceptions)
 
 
-async def get_airtable_posts() -> AsyncIterable[Post]:
-    airtable = get_airtable_instance()
-    db = await get_db()
+async def get_bluesky_posts() -> AsyncIterable[any]:
+    try:
+        client, feeds = get_bluesky_instance()
+        db = await get_db()
+        min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
+        max_post = await db.post.find_first(where={'source': 'bluesky'}, order={'created_at': 'desc'})
+        if max_post is not None:
+            min_time = max_post.created_at
+    except Exception as e:
+        raise FetchError("Error fetching Bluesky config", [e])
 
-    for record in airtable.all():
-        record_id = record["id"]
-        record_fields = record["fields"]
-        created_at = datetime.fromisoformat(record["createdTime"])
+    exceptions = []
 
+    for feed in feeds:
         try:
-            user = record_fields["Account"]
-            content_text = content_html = record_fields["Content"]
-            url = record_fields["Link"]
-            source = record_fields["Source"]
-            source_id = str(record_fields["Id"])
-            raw = json.dumps(record_fields)
-        except KeyError:
-            continue
+            fetch_next_page = True
+            cursor = ''
+            while fetch_next_page:
+                data = client.app.bsky.feed.get_feed({
+                    'feed': feed,
+                    'limit': 50,
+                    'cursor': cursor
+                }, headers={'Accept-Language': 'en'})
+                time.sleep(10)
+                cursor = data.cursor
+                for b_post in data.feed:
+                    user = b_post.post.author.handle
+                    content_txt = b_post.post.record.text
+                    created_at = datetime.fromisoformat(b_post.post.record.created_at)
+                    source = "bluesky"
+                    source_id = b_post.post.cid
+                    url = f"https://bsky.app/profile/{user}/post/{b_post.post.uri.split('/')[-1]}"
+                    raw = dict(b_post)
+                    raw["$feed"] = feed
 
-        if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-            post = await db.post.create({
-                'source': source,
-                'source_id': source_id,
-                'user': user,
-                'url': url,
-                'created_at': created_at,
-                'fetched_at': datetime.now(tz=timezone.utc),
-                'content_html': content_html,
-                'content_txt': content_text,
-                'is_hidden': len(content_text.split()) < 3,
-                'raw': raw
-            })
-            if not post.is_hidden:
-                await hide_post_if_not_about_cybersecurity(post)
-            if not post.is_hidden:
-                await format_post_for_search(post, regenerate=True)
-            yield await db.post.find_unique(where={'id': post.id})
-        airtable.delete(record_id)
+                    if created_at < min_time:
+                        fetch_next_page = False
+                        break
 
-
-async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
-    if min_id is None:
-        max_post = await (await get_db()).post.find_first(where={'source': 'mastodon'}, order={'created_at': 'desc'})
-        min_id = int(max_post.source_id) if max_post is not None else None
-
-    mastodon = get_mastodon_instance()
-
-    ended = False
-    end_date = datetime(2024, 7, 1, tzinfo=timezone.utc)
-    max_id = None
-
-    while not ended:
-        timeline = mastodon.timeline_home(min_id=min_id, max_id=max_id)
-        if not timeline:
-            print('[*] Nothing more to check, exiting')
-            break
-        for post in timeline:
-            if post['created_at'] > end_date:
-                if save:
-                    content_html = post["content"]
-                    content_text = read_html(content_html)
-                    db = await get_db()
-                    source_id = str(post['id'])
-                    if not await db.post.find_first(where={'source': 'mastodon', 'source_id': source_id}):
+                    if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                        # noinspection PyTypeChecker
                         post = await db.post.create({
-                            'source': 'mastodon',
+                            'source': source,
                             'source_id': source_id,
-                            'user': post['account']['acct'],
-                            'url': post['url'] or post['uri'],
-                            'created_at': post['created_at'],
+                            'user': user,
+                            'url': url,
+                            'created_at': created_at,
                             'fetched_at': datetime.now(tz=timezone.utc),
-                            'content_html': content_html,
-                            'content_txt': content_text,
-                            'is_hidden': len(content_text.split()) < 3,
-                            'raw': json.dumps(post, default=json_serial)
+                            'content_html': content_txt,
+                            'content_txt': content_txt,
+                            'is_hidden': len(content_txt.split()) < 3,
+                            'raw': json.dumps(raw, default=dict)
                         })
                         if not post.is_hidden:
                             await hide_post_if_not_about_cybersecurity(post)
                         if not post.is_hidden:
                             await format_post_for_search(post, regenerate=True)
                         yield await db.post.find_unique(where={'id': post.id})
-            else:
-                ended = True
-                print('[*] Selected end time reached, exiting')
-                break
+        except Exception as e:
+            exceptions.append(e)
+    if exceptions:
+        raise FetchError("Error fetching Bluesky feeds", exceptions)
 
-        max_id = timeline[-1]['id']
-        if not ended:
-            print('[*] Fetched posts up to', timeline[-1]['created_at'],
-                  f'got {mastodon.ratelimit_remaining} requests left')
-            if mastodon.ratelimit_remaining <= 1:
-                sleep_time = max(0, mastodon.ratelimit_reset - time.time())
-                print(f'[*] Ratelimit reached, sleeping for {sleep_time} s until {mastodon.ratelimit_reset}')
-                time.sleep(sleep_time)
-            time.sleep(1)
+
+async def get_airtable_posts() -> AsyncIterable[Post]:
+    try:
+        airtable = get_airtable_instance()
+        db = await get_db()
+
+        for record in airtable.all():
+            record_id = record["id"]
+            record_fields = record["fields"]
+            created_at = datetime.fromisoformat(record["createdTime"])
+
+            try:
+                user = record_fields["Account"]
+                content_text = content_html = record_fields["Content"]
+                url = record_fields["Link"]
+                source = record_fields["Source"]
+                source_id = str(record_fields["Id"])
+                raw = json.dumps(record_fields)
+            except KeyError:
+                continue
+
+            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                post = await db.post.create({
+                    'source': source,
+                    'source_id': source_id,
+                    'user': user,
+                    'url': url,
+                    'created_at': created_at,
+                    'fetched_at': datetime.now(tz=timezone.utc),
+                    'content_html': content_html,
+                    'content_txt': content_text,
+                    'is_hidden': len(content_text.split()) < 3,
+                    'raw': raw
+                })
+                if not post.is_hidden:
+                    await hide_post_if_not_about_cybersecurity(post)
+                if not post.is_hidden:
+                    await format_post_for_search(post, regenerate=True)
+                yield await db.post.find_unique(where={'id': post.id})
+            airtable.delete(record_id)
+    except Exception as e:
+        raise FetchError("Error fetching Airtable posts", [e])
+
+
+async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
+    try:
+        if min_id is None:
+            max_post = await (await get_db()).post.find_first(where={'source': 'mastodon'},
+                                                              order={'created_at': 'desc'})
+            min_id = int(max_post.source_id) if max_post is not None else None
+
+        mastodon = get_mastodon_instance()
+
+        ended = False
+        end_date = datetime(2024, 7, 1, tzinfo=timezone.utc)
+        max_id = None
+
+        while not ended:
+            timeline = mastodon.timeline_home(min_id=min_id, max_id=max_id)
+            if not timeline:
+                print('[*] Nothing more to check, exiting')
+                break
+            for post in timeline:
+                if post['created_at'] > end_date:
+                    if save:
+                        content_html = post["content"]
+                        content_text = read_html(content_html)
+                        db = await get_db()
+                        source_id = str(post['id'])
+                        if not await db.post.find_first(where={'source': 'mastodon', 'source_id': source_id}):
+                            post = await db.post.create({
+                                'source': 'mastodon',
+                                'source_id': source_id,
+                                'user': post['account']['acct'],
+                                'url': post['url'] or post['uri'],
+                                'created_at': post['created_at'],
+                                'fetched_at': datetime.now(tz=timezone.utc),
+                                'content_html': content_html,
+                                'content_txt': content_text,
+                                'is_hidden': len(content_text.split()) < 3,
+                                'raw': json.dumps(post, default=json_serial)
+                            })
+                            if not post.is_hidden:
+                                await hide_post_if_not_about_cybersecurity(post)
+                            if not post.is_hidden:
+                                await format_post_for_search(post, regenerate=True)
+                            yield await db.post.find_unique(where={'id': post.id})
+                else:
+                    ended = True
+                    print('[*] Selected end time reached, exiting')
+                    break
+
+            max_id = timeline[-1]['id']
+            if not ended:
+                print('[*] Fetched posts up to', timeline[-1]['created_at'],
+                      f'got {mastodon.ratelimit_remaining} requests left')
+                if mastodon.ratelimit_remaining <= 1:
+                    sleep_time = max(0, mastodon.ratelimit_reset - time.time())
+                    print(f'[*] Ratelimit reached, sleeping for {sleep_time} s until {mastodon.ratelimit_reset}')
+                    time.sleep(sleep_time)
+                time.sleep(1)
+    except Exception as e:
+        raise FetchError("Error fetching Mastodon posts", [e])
 
 
 async def generate_tags() -> None:
-    db = await get_db()
-    untagged_posts = await db.post.find_many(where={'tags_assigned': False, 'is_hidden': False})
-    print(f'[*] found {len(untagged_posts)} posts to tag')
+    try:
+        db = await get_db()
+        untagged_posts = await db.post.find_many(where={'tags_assigned': False, 'is_hidden': False})
+        print(f'[*] found {len(untagged_posts)} posts to tag')
 
-    for i, post in enumerate(untagged_posts):
-        print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
-        post_content = post.content_txt
-        print("[?]", post_content)
+        for i, post in enumerate(untagged_posts):
+            print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
+            post_content = post.content_txt[:1000]
+            print("[?]", post_content)
 
-        tag_names = set(re.findall(r'#\w+', post_content))
+            tag_names = set(re.findall(r'#\w+', post_content))
 
-        if len(post_content.split()) > 15:
-            tag_names.update(set(prompt_tags(post_content)))
+            if len(post_content.split()) > 15:
+                tag_names.update(set(prompt_tags(post_content)))
 
-        tag_names = {x.upper() for x in tag_names}
-        print("[-]", tag_names)
+            tag_names = {x.upper() for x in tag_names}
+            print("[-]", tag_names)
 
-        tags = [await db.tag.upsert(where={"name": tag_name},
-                                    data={'create': {"name": tag_name, "color": generate_random_color()}, 'update': {}})
-                for tag_name in tag_names]
-        await db.post.update(where={'id': post.id},
-                             data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
-        await format_post_for_search(post, regenerate=True)
+            tags = [await db.tag.upsert(where={"name": tag_name},
+                                        data={'create': {"name": tag_name, "color": generate_random_color()},
+                                              'update': {}})
+                    for tag_name in tag_names]
+            await db.post.update(where={'id': post.id},
+                                 data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
+            await format_post_for_search(post, regenerate=True)
+    except Exception as e:
+        raise FetchError("Error generating tags", [e])
 
 
 async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
