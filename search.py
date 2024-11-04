@@ -303,5 +303,7 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     print(f'[*] Search time matched {int(-1000 * (back_data["time_goal_fulltext"] - back_data["time_goal_matched"]))}ms')
     print(f'[*] Search time eval {int(-1000 * (back_data["time_goal_matched"] - back_data["time_goal_eval"]))}ms')
     print(f'[*] Search time end {int(-1000 * (back_data["time_goal_eval"] - back_data["time_end"]))}ms')
-    
+    print(f'[*] Search time total {int(-1000 * back_data["time_total"])}ms')
+    print(f'[*] Search results {len(result)}')
+
     return result

@@ -107,6 +107,7 @@ async def get_rss_posts() -> AsyncIterable[Post]:
                     created_at = datetime.fromisoformat(rss_post.published)
                 except ValueError:
                     created_at = parsedate_to_datetime(rss_post.published)
+                    assert created_at is not None
 
                 if created_at < min_post_time:
                     continue

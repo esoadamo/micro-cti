@@ -24,6 +24,7 @@ model Post {
   tags_assigned  Boolean  @default(false)
   is_hidden      Boolean  @default(false)
   tags           Tag[]    @relation("PostTags")
+  iocs           IoC[]    @relation("PostIoCs")
 }
 
 model Tag {
@@ -31,4 +32,14 @@ model Tag {
   name  String @unique
   color String @default("#000")
   posts Post[] @relation("PostTags")
+}
+
+model IoC {
+  id      Int     @id @default(autoincrement())
+  type    String
+  subtype String?
+  value   String
+  posts   Post[]  @relation("PostIoCs")
+
+  @@unique([type, subtype, value])
 }
