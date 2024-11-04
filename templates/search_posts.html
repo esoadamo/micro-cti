@@ -1,0 +1,16 @@
+{% extends "search_base.html" %}
+{% block results %}
+{% for (post, score) in results %}
+<li>
+    <a target=_blank href="{{ post.url|escape }}">{{ post.content_txt[:120]|escape }}...</a> ({{post.source|escape}}:{{post.user|escape}}, {{post.created_at}}, {{score}})
+    {% if post.tags %}
+    <br>
+    <div class="tags">
+        {% for tag in post.tags %}
+            <span class="tag" style="color: {{ tag.color }}">{{tag.name|escape}}</span>
+        {% endfor   %}
+    </div>
+    {% endif %}
+</li>
+{% endfor %}
+{% endblock %}
