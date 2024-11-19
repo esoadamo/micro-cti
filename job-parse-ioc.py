@@ -11,6 +11,7 @@ async def main() -> None:
         print(f'[*] {i+1}/{len(posts)}', post.content_txt)
         async for ioc in parse_iocs(post):
             print(f'  [+] {ioc}')
+    await db.disconnect()
 
 
 if __name__ == "__main__":

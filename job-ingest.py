@@ -3,6 +3,7 @@ import traceback
 
 from prisma.models import Post
 
+from db import get_db
 from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError
 
 
@@ -14,6 +15,7 @@ def print_post(post: Post):
 async def main() -> int:
     exceptions = []
     print('[*] Fetching started')
+    db = await get_db()
 
     try:
         async for post in get_rss_posts():
@@ -59,6 +61,7 @@ async def main() -> int:
         exceptions.append(e)
         exceptions.extend(e.source)
 
+    await db.disconnect()
     if exceptions:
         print('[!] Some errors were encountered:')
         for i, e in enumerate(exceptions):
