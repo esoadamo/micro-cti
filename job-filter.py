@@ -13,6 +13,7 @@ async def main() -> None:
             print('[HIDDEN]', post.content_txt)
         else:
             print('[KEEP]', post.content_txt)
+    await db.disconnect()
 
 
 if __name__ == "__main__":
