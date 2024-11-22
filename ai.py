@@ -3,6 +3,7 @@ import time
 import tomllib
 import traceback
 from typing import Tuple, Any
+from random import choice
 
 from openai import OpenAI, RateLimitError
 from prisma.models import Post
@@ -12,7 +13,11 @@ def get_client() -> Tuple[OpenAI, Any]:
     with open("config.toml", 'rb') as f:
         config = tomllib.load(f)["ai"]
 
-    return OpenAI(base_url=config["base_url"], api_key=config["api_key"]), config["model"]
+    api_key = config["api_key"]
+    if isinstance(api_key, list):
+        config["api_key"] = choice(api_key)
+
+    return OpenAI(base_url=config["base_url"], api_key=api_key), config["model"]
 
 
 def prompt(messages: list, tries: int = 5, retry_sleep_max: int = 30) -> str:
