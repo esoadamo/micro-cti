@@ -38,13 +38,16 @@ async def main() -> int:
     print('[*] Fetching started')
     db = await get_db()
 
-    exceptions = await asyncio.gather(
+    exceptions_2d = await asyncio.gather(
         fetch_posts('RSS', get_rss_posts),
         fetch_posts('Mastodon', get_mastodon_posts),
         fetch_posts('Airtable', get_airtable_posts),
-        fetch_posts('Bluesky', get_bluesky_posts),
-        return_exceptions=True
+        fetch_posts('Bluesky', get_bluesky_posts)
     )
+
+    exceptions = []
+    for exceptions in exceptions_2d:
+        exceptions.extend(exceptions)
 
     print('[*] Fetching finished')
     print('[*] Generating tags for all posts')
