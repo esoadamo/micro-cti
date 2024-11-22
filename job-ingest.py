@@ -98,6 +98,11 @@ async def main() -> int:
         return_exceptions=True
     )
 
+    print('[*] Fetching finished')
+    print('[*] Generating tags for all posts')
+    await generate_tags()
+    print('[*] Tags generated')
+
     await db.disconnect()
     if exceptions:
         print('[!] Some errors were encountered:')

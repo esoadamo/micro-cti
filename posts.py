@@ -199,6 +199,14 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
                         if not post.is_hidden:
                             await format_post_for_search(post, regenerate=True)
                         yield await db.post.find_unique(where={'id': post.id})
+
+                # Check rate limits
+                rate_limit_remaining = data.headers.get('x-ratelimit-remaining')
+                rate_limit_reset = data.headers.get('x-ratelimit-reset')
+                if int(rate_limit_remaining) <= 1:
+                    sleep_time = max(0.0, float(rate_limit_reset) - time.time()) + 1
+                    print(f'[*] Bluesky Ratelimit reached, sleeping for {sleep_time} s until {rate_limit_reset}')
+                    time.sleep(sleep_time)
         except Exception as e:
             exceptions.append(e)
     if exceptions:
