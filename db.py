@@ -1,14 +1,19 @@
 from datetime import date, datetime
 from prisma import Prisma
+from threading import Lock
+
+DB_LOCK = Lock()
 
 
-async def get_db(cache = {}) -> Prisma:
+# noinspection PyDefaultArgument
+async def get_db(cache={}) -> Prisma:
     if "db" not in cache:
-        cache["db"] = Prisma()
-        await cache["db"].connect()
-        print('[*] database connection estabilished successfuly')
+        with DB_LOCK:
+            if "db" not in cache:
+                cache["db"] = Prisma()
+                await cache["db"].connect()
+                print('[*] database connection estabilished successfuly')
     return cache["db"]
-
 
 
 def json_serial(obj):
