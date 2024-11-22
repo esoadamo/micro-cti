@@ -15,7 +15,7 @@ def get_client() -> Tuple[OpenAI, Any]:
     return OpenAI(base_url=config["base_url"], api_key=config["api_key"]), config["model"]
 
 
-def prompt(messages: list, tries: int = 5, prompt_sleep: int = 20, retry_sleep: int = 30) -> str:
+def prompt(messages: list, tries: int = 5, retry_sleep_max: int = 30) -> str:
     client, model = get_client()
     result = ""
     for _ in range(tries):
@@ -27,10 +27,24 @@ def prompt(messages: list, tries: int = 5, prompt_sleep: int = 20, retry_sleep: 
             )
             result = completion.choices[0].message.content
             break
-        except Exception:
+        except Exception as e:
+            retry_sleep = retry_sleep_max
+
+            # Check rate limits in case of failure
+            # noinspection PyUnresolvedReferences
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    rate_limit_remaining = e.response.headers.get('x-ratelimit-remaining')
+                    rate_limit_reset = e.response.headers.get('x-ratelimit-reset')
+                    print(f"[*] AI Rate Limit Remaining: {rate_limit_remaining}")
+                    print(f"[*] AI Rate Limit Reset: {rate_limit_reset}")
+                    retry_sleep = int(rate_limit_reset) - int(time.time())
+                    print(f"[*] AI Rate Limit Sleep: {retry_sleep}")
+                except Exception as e:
+                    print(f"[!] AI Failed to get rate limit: {e}")
+
             time.sleep(retry_sleep)
             traceback.print_exc()
-    time.sleep(prompt_sleep)
     return result
 
 
