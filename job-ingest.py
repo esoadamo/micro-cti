@@ -1,6 +1,7 @@
 import asyncio
 import traceback
-from typing import List
+from collections.abc import Callable
+from typing import List, AsyncIterable
 
 from prisma.models import Post
 
@@ -13,76 +14,23 @@ def print_post(post: Post):
     print(f'[-]{"[-]" if post.is_hidden else "[+]"} {content} - {post.user}@{post.source}')
 
 
-async def fetch_bluesky_posts() -> List[Exception]:
+async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) -> List[Exception]:
     exceptions: List[Exception] = []
     post_ids: List[int] = []
     try:
-        async for post in get_bluesky_posts():
+        async for post in function():
             print_post(post)
             post_ids.append(post.id)
-        print('[*] Bluesky fetched')
+        print(f'[*] {prefix} fetched')
     except FetchError as e:
-        print(f'[!] Bluesky fetch failed: {e}')
+        print(f'[!] {prefix} fetch failed: {e}')
         exceptions.append(e)
         exceptions.extend(e.source)
 
-    print('[*] Generating Bluesky tags')
+    print(f'[*] {prefix} Bluesky tags')
     await generate_tags(post_ids)
-    print('[*] Bluesky tags generated')
+    print(f'[*] {prefix} tags generated')
 
-    return exceptions
-
-
-async def fetch_airtable_posts() -> List[Exception]:
-    exceptions: List[Exception] = []
-    post_ids: List[int] = []
-    try:
-        async for post in get_airtable_posts():
-            print_post(post)
-            post_ids.append(post.id)
-        print('[*] Airtable fetched')
-    except FetchError as e:
-        print(f'[!] Airtable fetch failed: {e}')
-        exceptions.append(e)
-        exceptions.extend(e.source)
-
-    print('[*] Generating Airtable tags')
-    await generate_tags(post_ids)
-    print('[*] Airtable tags generated')
-
-    return exceptions
-
-
-async def fetch_mastodon_posts() -> List[Exception]:
-    exceptions: List[Exception] = []
-    post_ids: List[int] = []
-    try:
-        async for post in get_mastodon_posts():
-            print_post(post)
-            post_ids.append(post.id)
-        print('[*] Mastodon fetched')
-    except FetchError as e:
-        print(f'[!] Mastodon fetch failed: {e}')
-        exceptions.append(e)
-        exceptions.extend(e.source)
-
-    print('[*] Generating Mastodon tags')
-    await generate_tags(post_ids)
-    print('[*] Mastodon tags generated')
-
-    return exceptions
-
-
-async def fetch_rss_posts() -> List[Exception]:
-    exceptions: List[Exception] = []
-    try:
-        async for post in get_rss_posts():
-            print_post(post)
-        print('[*] RSS fetched')
-    except FetchError as e:
-        print(f'[!] RSS fetch failed: {e}')
-        exceptions.append(e)
-        exceptions.extend(e.source)
     return exceptions
 
 
@@ -91,10 +39,10 @@ async def main() -> int:
     db = await get_db()
 
     exceptions = await asyncio.gather(
-        fetch_bluesky_posts(),
-        fetch_airtable_posts(),
-        fetch_mastodon_posts(),
-        fetch_rss_posts(),
+        fetch_posts('RSS', get_rss_posts),
+        fetch_posts('Mastodon', get_mastodon_posts),
+        fetch_posts('Airtable', get_airtable_posts),
+        fetch_posts('Bluesky', get_bluesky_posts),
         return_exceptions=True
     )
 
