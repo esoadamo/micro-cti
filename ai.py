@@ -4,7 +4,7 @@ import tomllib
 import traceback
 from typing import Tuple, Any
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 from prisma.models import Post
 
 
@@ -29,22 +29,18 @@ def prompt(messages: list, tries: int = 5, retry_sleep_max: int = 30) -> str:
             break
         except Exception as e:
             retry_sleep = retry_sleep_max
+            exception_ok = False
 
-            # Check rate limits in case of failure
-            # noinspection PyUnresolvedReferences
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    rate_limit_remaining = e.response.headers.get('x-ratelimit-remaining')
-                    rate_limit_reset = e.response.headers.get('x-ratelimit-reset')
-                    print(f"[*] AI Rate Limit Remaining: {rate_limit_remaining}")
-                    print(f"[*] AI Rate Limit Reset: {rate_limit_reset}")
-                    retry_sleep = int(rate_limit_reset) - int(time.time())
-                    print(f"[*] AI Rate Limit Sleep: {retry_sleep}")
-                except Exception as e:
-                    print(f"[!] AI Failed to get rate limit: {e}")
+            if isinstance(e, RateLimitError):
+                retry_after = e.response.headers.get("ratelimitbysize-retry-after")
+                if retry_after is not None:
+                    retry_sleep = int(retry_after)
+                    print(f"[.] AI rate limited, retrying in {retry_sleep} seconds")
+                    exception_ok = True
 
             time.sleep(retry_sleep)
-            traceback.print_exc()
+            if not exception_ok:
+                traceback.print_exc()
     return result
 
 
@@ -87,3 +83,11 @@ def prompt_check_cybersecurity_post(post: Post) -> bool:
     ]
 
     return 'yes' in prompt(messages).lower()
+
+
+if __name__ == "__main__":
+    def test():
+        for _ in range(100):
+            print(prompt_tags("I found a new vulnerability in Windows 10."))
+
+    test()
