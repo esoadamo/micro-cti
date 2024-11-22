@@ -309,10 +309,13 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
         raise FetchError("Error fetching Mastodon posts", [e])
 
 
-async def generate_tags() -> None:
+async def generate_tags(ids: Optional[List[int]] = None) -> None:
     try:
         db = await get_db()
-        untagged_posts = await db.post.find_many(where={'tags_assigned': False, 'is_hidden': False})
+        posts_where_filter = {'tags_assigned': False, 'is_hidden': False}
+        if ids:
+            posts_where_filter['id'] = {'in': ids}
+        untagged_posts = await db.post.find_many(where=posts_where_filter)
         print(f'[*] found {len(untagged_posts)} posts to tag')
 
         for i, post in enumerate(untagged_posts):
