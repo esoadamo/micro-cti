@@ -17,6 +17,7 @@ def print_post(post: Post):
 async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) -> List[Exception]:
     exceptions: List[Exception] = []
     post_ids: List[int] = []
+    print(f'[*] {prefix} fetching')
     try:
         async for post in function():
             print_post(post)
