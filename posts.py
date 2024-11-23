@@ -159,14 +159,14 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
             fetch_next_page = True
             cursor = ''
             while fetch_next_page:
-                data = client.app.bsky.feed.get_feed({
+                response = client.app.bsky.feed.get_feed({
                     'feed': feed,
                     'limit': 50,
                     'cursor': cursor
                 }, headers={'Accept-Language': 'en'})
                 time.sleep(10)
-                cursor = data.cursor
-                for b_post in data.feed:
+                cursor = response.cursor
+                for b_post in response.feed:
                     user = b_post.post.author.handle
                     content_txt = b_post.post.record.text
                     created_at = datetime.fromisoformat(b_post.post.record.created_at)
@@ -199,14 +199,6 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
                         if not post.is_hidden:
                             await format_post_for_search(post, regenerate=True)
                         yield await db.post.find_unique(where={'id': post.id})
-
-                # Check rate limits
-                rate_limit_remaining = data.headers.get('x-ratelimit-remaining')
-                rate_limit_reset = data.headers.get('x-ratelimit-reset')
-                if int(rate_limit_remaining) <= 1:
-                    sleep_time = max(0.0, float(rate_limit_reset) - time.time()) + 1
-                    print(f'[*] Bluesky Ratelimit reached, sleeping for {sleep_time} s until {rate_limit_reset}')
-                    time.sleep(sleep_time)
         except Exception as e:
             exceptions.append(e)
     if exceptions:
@@ -350,15 +342,14 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
         raise FetchError("Error generating tags", [e])
 
 
-async def hide_post_if_not_about_cybersecurity(post: Post) -> bool:
+async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = False) -> bool:
     keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing',
                           'bypass', 'outage', 'steal', 'malicious', 'compromise'}
     post_content = post.content_txt.lower()
     # Remove all @usernames from the post content
     post_content = re.sub(r'@\S+', '', post_content)
-    for keyword in keywords_whitelist:
-        if keyword.lower() in post_content:
-            return True
+    if not force_ai and any(keyword.lower() in post_content for keyword in keywords_whitelist):
+        return True
     db = await get_db()
     result = prompt_check_cybersecurity_post(post)
     if not result:
