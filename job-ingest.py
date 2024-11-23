@@ -27,7 +27,7 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
         exceptions.append(e)
         exceptions.extend(e.source)
 
-    print(f'[*] {prefix} Bluesky tags')
+    print(f'[*] {prefix} generating tags')
     await generate_tags(post_ids)
     print(f'[*] {prefix} tags generated')
 
@@ -50,9 +50,6 @@ async def main() -> int:
         exceptions.extend(exceptions)
 
     print('[*] Fetching finished')
-    print('[*] Generating tags for all posts')
-    await generate_tags()
-    print('[*] Tags generated')
 
     await db.disconnect()
     if exceptions:
