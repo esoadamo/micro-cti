@@ -94,3 +94,8 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
 @app.get("/favicon.svg", response_class=FileResponse)
 async def favicon() -> FileResponse:
     return FileResponse('favicon.svg')
+
+
+@app.get("/healthcheck")
+async def healthcheck() -> dict:
+    return {'status': 'ok', 'latest_ingestion_time': await get_latest_ingestion_time()}
