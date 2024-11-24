@@ -23,10 +23,27 @@ async def main() -> int:
     print('[*] Loading tags')
     max_tag_id = await db.tag.find_first(order={'id': 'desc'})
 
+    print('[*] Deleting tags with short name')
+    to_delete: Set[int] = set()
+    async for tags in get_tags(max_tag_id.id, step):
+        for tag in tags:
+            print(f'[*] {tag.id}/{max_tag_id.id}', end='\r')
+            if len(tag.name) < 5:
+                to_delete.add(tag.id)
+    for tag_id in to_delete:
+        print(f'[*] Deleting tag {tag_id}')
+        await db.tag.delete(where={'id': tag_id})
+    print('[*] Tags with short name deleted')
+
     combine: Dict[int, Set[int]] = {}
     ignore: Set[int] = set()
 
     print('[*] Processing subtags')
+
+    all_pages = []
+    async for subtags in get_tags(max_tag_id.id, step):
+        all_pages.append(subtags)
+
     for tag_id_min_curr in range(0, max_tag_id.id, step):
         print(f'[*] Processing tags from {tag_id_min_curr} to {tag_id_min_curr + step}')
         tags = await db.tag.find_many(skip=tag_id_min_curr, take=step)
@@ -36,7 +53,7 @@ async def main() -> int:
             if tag.id in ignore:
                 continue
             page_num = 0
-            async for subtags in get_tags(max_tag_id.id, step):
+            for subtags in all_pages:
                 print(f'[*] {i - tag_id_min_curr:04d}/{step} (page {page_num})', end='\r')
                 page_num += 1
 
@@ -46,7 +63,6 @@ async def main() -> int:
                 for j, tag2 in enumerate(subtags):
                     if j in ignore or tag2.id < tag.id:
                         continue
-                    tag2 = tags[j]
                     if tag.name.lower().startswith(tag2.name.lower()):
                         combine.setdefault(tag2.id, set()).add(tag.id)
                         ignore.update((tag.id, tag2.id))
