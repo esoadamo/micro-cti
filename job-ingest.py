@@ -23,14 +23,19 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
             print_post(post)
             post_ids.append(post.id)
         print(f'[*] {prefix} fetched')
-    except FetchError as e:
+    except Exception as e:
         print(f'[!] {prefix} fetch failed: {e}')
         exceptions.append(e)
-        exceptions.extend(e.source)
+        if isinstance(e, FetchError):
+            exceptions.extend(e.source)
 
-    print(f'[*] {prefix} generating tags')
-    await generate_tags(post_ids)
-    print(f'[*] {prefix} tags generated')
+    try:
+        print(f'[*] {prefix} generating tags')
+        await generate_tags(post_ids)
+        print(f'[*] {prefix} tags generated')
+    except Exception as e:
+        print(f'[!] {prefix} tag generation failed: {e}')
+        exceptions.append(e)
 
     return exceptions
 
