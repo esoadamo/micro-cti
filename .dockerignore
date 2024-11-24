@@ -9,3 +9,5 @@ docker-compose.yaml
 .run
 .idea
 *.log
+.git
+.gitignore
