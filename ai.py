@@ -2,6 +2,7 @@ import re
 import time
 import tomllib
 import traceback
+import string
 from typing import Tuple, Any
 from random import choice
 
@@ -16,7 +17,7 @@ def get_client() -> Tuple[OpenAI, Any]:
 
     api_key = config["api_key"]
     if isinstance(api_key, list):
-        config["api_key"] = choice(api_key)
+        api_key = choice(api_key)
 
     return OpenAI(base_url=config["base_url"], api_key=api_key), config["model"]
 
@@ -24,6 +25,10 @@ def get_client() -> Tuple[OpenAI, Any]:
 def prompt(messages: list, tries: int = 5, retry_sleep_max: int = 30) -> str:
     client, model = get_client()
     result = ""
+
+    for message in messages:
+        message["content"] = ''.join(filter(lambda x: x in string.printable, message["content"]))
+
     for _ in range(tries):
         # noinspection PyBroadException
         try:
@@ -72,7 +77,7 @@ def prompt_tags(text: str, tries: int = 3) -> list[str]:
                            "You never output anything else. "
             }, {
                 "role": "user",
-                "content": "Please suggest what hashtags should I use for this post: " + text
+                "content": "Please suggest what hashtags should I use for this post: " + text.replace("\n", " ")
             }
         ]
 
@@ -82,6 +87,7 @@ def prompt_tags(text: str, tries: int = 3) -> list[str]:
         tags = list(set(re.findall(r'#\w+', response)))
         if tags:
             return tags
+    return []
 
 
 def prompt_check_cybersecurity_post(post: Post) -> bool:
