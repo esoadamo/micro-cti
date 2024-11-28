@@ -2,11 +2,22 @@ version: '3.8'
 
 services:
   micro-cti:
+    container_name: micro-cti
     image: esoadamo/micro-cti
     build:
       context: .
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     volumes:
-      - ./data.sqlite3:/app/data.sqlite3 
+      - ./posts.jsonl:/app/posts.jsonl:ro
       - ./config.toml:/app/config.toml:ro
+
+  micro-cti-db:
+    image: mariadb:lts
+    container_name: micro-cti-db
+    restart: always
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: microcti1234
+      MARIADB_DATABASE: microcti
