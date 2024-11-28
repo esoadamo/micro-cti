@@ -1,44 +1,47 @@
 datasource db {
-  provider = "sqlite"
-  url      = "file:data.sqlite3"
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 generator db {
   provider             = "prisma-client-py"
   interface            = "asyncio"
   recursive_type_depth = 5
+  previewFeatures      = ["fullTextSearch", "fullTextIndex"]
 }
 
 model Post {
   id             Int      @id @default(autoincrement())
   source_id      String?
   source         String
-  user           String
+  user           String   @db.VarChar(255)
   created_at     DateTime
   fetched_at     DateTime
-  url            String
-  content_html   String
-  content_txt    String
-  content_search String?
-  raw            String
+  url            String   @db.VarChar(512)
+  content_html   String   @db.Text
+  content_txt    String   @db.Text
+  content_search String?  @db.Text
+  raw            String   @db.Text
   tags_assigned  Boolean  @default(false)
   is_hidden      Boolean  @default(false)
   tags           Tag[]    @relation("PostTags")
   iocs           IoC[]    @relation("PostIoCs")
+
+  @@fulltext([content_search])
 }
 
 model Tag {
   id    Int    @id @default(autoincrement())
-  name  String @unique
-  color String @default("#000")
+  name  String @unique @db.VarChar(255)
+  color String @default("#000") @db.VarChar(13)
   posts Post[] @relation("PostTags")
 }
 
 model IoC {
   id      Int     @id @default(autoincrement())
-  type    String
-  subtype String?
-  value   String
+  type    String  @db.VarChar(255)
+  subtype String?  @db.VarChar(255)
+  value   String  @db.VarChar(512)
   posts   Post[]  @relation("PostIoCs")
 
   @@unique([type, subtype, value])
