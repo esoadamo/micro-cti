@@ -195,8 +195,10 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     back_data['time_start'] = time.time()
 
     strict_search = False
+    fast_search = False
+    results_max = 100
 
-    for command, param in (('strict', None), ('min_score', r'\d+'), ('count', r'\d+')):
+    for command, param in (('strict', None), ('fast', None), ('min_score', r'\d+'), ('count', r'\d+')):
         command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
         command_search = re.match(command_re, fulltext)
         if not command_search:
@@ -206,10 +208,15 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
         match command:
             case "strict":
                 strict_search = True
+            case "fast":
+                fast_search = True
             case "min_score":
                 min_score = int(param_value)
             case "count":
-                count = min(int(param_value), 100)
+                count = min(int(param_value), results_max)
+
+    if fast_search and strict_search:
+        raise ParseError("Fast search and strict search cannot be combined")
 
     fulltext = re.sub(r"\s+", " ", fulltext)
     print(f"[*] Search commands {fulltext=} {strict_search=} {min_score=} {count=}")
@@ -228,11 +235,24 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     matched_ids_score: Dict[int, float] = {}
     while True:
         time_db_start = time.time()
-        posts = await PostSearchable.prisma(client=db).find_many(
-            where={'is_hidden': False, 'id': {'lte': post_max_id}},
-            take=SEARCH_FETCH_STEP,
-            order={'id': 'desc'}
-        )
+
+        if fast_search:
+            # Fast search is done directly in the database
+            if matched_ids_score:
+                break  # Fast search runs only once
+            posts = []
+            for term in search_terms:
+                # noinspection SqlNoDataSourceInspection
+                posts.extend(await PostSearchable.prisma(client=db).query_raw(
+                    f"SELECT id, content_search FROM Post WHERE is_hidden = false AND MATCH(content_search) AGAINST(? IN NATURAL LANGUAGE MODE) LIMIT {results_max * 20}",
+                    term
+                ))
+        else:
+            posts = await PostSearchable.prisma(client=db).find_many(
+                where={'is_hidden': False, 'id': {'lte': post_max_id}},
+                take=SEARCH_FETCH_STEP,
+                order={'id': 'desc'}
+            )
         back_data.setdefault('time_goal_db', 0.0)
         back_data['time_goal_db'] += time.time() - time_db_start
 
