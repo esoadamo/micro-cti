@@ -12,7 +12,7 @@ async def get_db(cache={}) -> Prisma:
             if "db" not in cache:
                 cache["db"] = Prisma()
                 await cache["db"].connect()
-                print('[*] database connection estabilished successfuly')
+                print('[*] Database connection estabilished successfuly')
     return cache["db"]
 
 
