@@ -52,7 +52,7 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
         'search_posts.html',
         request,
         results=posts,
-        search_term=search_term,
+        search_term=search_back_data.get('query', search_term),
         latest_ingestion_time=await get_latest_ingestion_time(),
         error=error,
         time_render=time_delta_ms,
