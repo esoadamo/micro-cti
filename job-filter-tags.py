@@ -30,19 +30,19 @@ async def main() -> int:
     print('[*] Loading tags')
     max_tag_id = await db.tag.find_first(order={'id': 'desc'})
 
-    print('[*] Deleting tags with short name')
+    print('[*] Deleting tags with short or long name')
     to_delete: Set[int] = set()
     page_i = 0
     async for tags in get_tags(max_tag_id.id, step):
         page_i += 1
         for tag in tags:
             print(f'[*] {tag.id}/{max_tag_id.id} (page {page_i})', end='\r')
-            if len(tag.name) < 5:
+            if len(tag.name) < 5 or len(tag.name) > 50:
                 to_delete.add(tag.id)
     for tag_id in to_delete:
         print(f'[*] Deleting tag {tag_id}')
         await db.tag.delete(where={'id': tag_id})
-    print('[*] Tags with short name deleted')
+    print('[*] Tags with short or long name deleted')
 
     combine: Dict[int, Set[int]] = {}
     ignore: Set[int] = set()
