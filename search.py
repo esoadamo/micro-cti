@@ -191,14 +191,17 @@ def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tu
 
 async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
     print(f"[*] Search started {fulltext=} {count=} {min_score=}")
+    final_query = fulltext
     back_data = back_data if back_data is not None else {}
     back_data['time_start'] = time.time()
 
     strict_search = False
     fast_search = False
     results_max = 100
+    search_latest: Optional[datetime] = None
+    search_earliest: Optional[datetime] = None
 
-    for command, param in (('strict', None), ('fast', None), ('min_score', r'\d+'), ('count', r'\d+')):
+    for command, param in (('strict', None), ('fast', None), ('min_score', r'\d+'), ('count', r'\d+'), ('from', r'\d{4}-\d{2}-\d{2}'), ('to', r'\d{4}-\d{2}-\d{2}')):
         command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
         command_search = re.match(command_re, fulltext)
         if not command_search:
@@ -214,6 +217,19 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
                 min_score = int(param_value)
             case "count":
                 count = min(int(param_value), results_max)
+            case "from":
+                search_earliest = datetime.fromisoformat(param_value)
+                search_earliest = search_earliest.replace(tzinfo=timezone.utc)
+            case "to":
+                search_latest = datetime.fromisoformat(param_value)
+                search_latest = search_latest.replace(tzinfo=timezone.utc)
+
+    if search_latest is None:
+        search_latest = datetime.now(tz=timezone.utc)
+        final_query = f"!to:{search_latest.strftime('%Y-%m-%d')} {final_query}"
+    if search_earliest is None:
+        search_earliest = search_latest - timedelta(days=7)
+        final_query = f"!from:{search_earliest.strftime('%Y-%m-%d')} {final_query}"
 
     if fast_search and strict_search:
         raise ParseError("Fast search and strict search cannot be combined")
@@ -248,8 +264,15 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
                     term
                 ))
         else:
+            additional_where = {}
+            if strict_search:
+                additional_where['created_at'] = {'gte': search_earliest, 'lte': search_latest}
+
             posts = await PostSearchable.prisma(client=db).find_many(
-                where={'is_hidden': False, 'id': {'lte': post_max_id}},
+                where={
+                    'is_hidden': False, 'id': {'lte': post_max_id},
+                    **additional_where
+                },
                 take=SEARCH_FETCH_STEP,
                 order={'id': 'desc'}
             )
@@ -297,8 +320,6 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     back_data['time_goal_matched'] = time.time() - time_goal_matched_start
 
     time_goal_eval_start = time.time()
-    search_latest = datetime.now(tz=timezone.utc)
-    search_earliest = search_latest - timedelta(days=7)
 
     for post in matched_posts:
         # Penalize posts with small number of tags
@@ -334,6 +355,7 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     result = [(post, round(matched_ids_score[post.id])) for post in matched_posts]
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
+    back_data['query'] = final_query
     
     print(f'[*] Search time DB {int(1000 * back_data["time_goal_db"])}ms')
     print(f'[*] Search time contents {int(1000 * back_data["time_goal_content"])}ms')
