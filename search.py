@@ -1,11 +1,9 @@
-import asyncio
 import itertools
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from math import floor, ceil
-from typing import List, Tuple, Union, Iterable, Optional
+from typing import List, Tuple, Union, Iterable, Optional, Dict, Set
 
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
@@ -47,7 +45,7 @@ WORD: /[^\s()]+/
 
 
 SEARCH_PARSER = Lark(SEARCH_GRAMMAR, start='start', parser='lalr')
-SEARCH_FETCH_JOBS = 64
+SEARCH_FETCH_STEP = 1000
 
 
 class PostSearchable(BasePost):
@@ -191,14 +189,6 @@ def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tu
     return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
 
 
-async def fetch_posts_partial(part: int, parts: int, post_max_id: int) -> List[PostSearchable]:
-    db = await get_db()
-    min_q_id = ceil(post_max_id * (part - 1 ) / parts)
-    max_q_id = floor(post_max_id * part / parts)
-    posts = await PostSearchable.prisma(client=db).find_many(where={'is_hidden': False, 'id': {'gte': min_q_id, 'lte': max_q_id}})
-    return posts
-
-
 async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
     print(f"[*] Search started {fulltext=} {count=} {min_score=}")
     back_data = back_data if back_data is not None else {}
@@ -228,37 +218,65 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
         strict_search = True
         fulltext = fulltext[7:]
 
+    query = parse_query(fulltext)
+    search_terms = list(filter(lambda x: x.strip(), parse_search_terms(query)))
+    for term in search_terms:
+        print(f'[*] subsearch {term=}')
+
     db = await get_db()
     post_max_id = (await db.post.find_first(order={'id': 'desc'})).id
+    matched_ids_score: Dict[int, float] = {}
+    while True:
+        time_db_start = time.time()
+        posts = await PostSearchable.prisma(client=db).find_many(
+            where={'is_hidden': False, 'id': {'lte': post_max_id}},
+            take=SEARCH_FETCH_STEP,
+            order={'id': 'desc'}
+        )
+        back_data.setdefault('time_goal_db', 0.0)
+        back_data['time_goal_db'] += time.time() - time_db_start
 
-    all_posts: List[PostSearchable] = []
-    for posts in await asyncio.gather(*[fetch_posts_partial(x + 1, SEARCH_FETCH_JOBS, post_max_id) for x in range(SEARCH_FETCH_JOBS)]):
-        all_posts.extend(posts)
+        if not posts:
+            break
+        post_max_id = posts[-1].id - 1
 
-    back_data['time_goal_db'] = time.time()
-    query = parse_query(fulltext)
-    post_contents = [(post.id, await format_post_for_search(post)) for post in all_posts]
-    back_data['time_goal_content'] = time.time()
-    matched_ids_score = {}
+        time_goal_content_start = time.time()
+        post_contents = [(post.id, await format_post_for_search(post)) for post in posts]
+        back_data.setdefault('time_goal_content', 0.0)
+        back_data['time_goal_content'] += time.time() - time_goal_content_start
+        matched_ids_score_curr = {}
 
-    for term in parse_search_terms(query):
-        if not term.strip():
-            continue
-        print(f'[*] subsearch {term=}')
-        back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
-        scorer = partial(post_fulltext_score, search_term=term)
-        post_scores = itertools.starmap(scorer, post_contents)
+        time_goal_fulltext_start = time.time()
+        for term in search_terms:
+            back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
+            scorer = partial(post_fulltext_score, search_term=term)
+            post_scores = itertools.starmap(scorer, post_contents)
 
-        for post_id, score in post_scores:
-            if score < min_score:
-                continue
-            matched_ids_score[post_id] = max(matched_ids_score.get(post_id, 0), score)
-    back_data['time_goal_fulltext'] = time.time()
+            for post_id, score in post_scores:
+                if score < min_score:
+                    continue
+                matched_ids_score_curr[post_id] = max(matched_ids_score_curr.get(post_id, 0), score)
 
+        matched_scores_ids: Dict[float, Set[int]] = {}
+        for post_id, score in matched_ids_score_curr.items():
+            matched_scores_ids.setdefault(score, set()).add(post_id)
+        posts_to_add = count * 2
+        for score in sorted(matched_scores_ids.keys(), reverse=True):
+            for post_id in matched_scores_ids[score]:
+                matched_ids_score[post_id] = score
+                posts_to_add -= 1
+                if posts_to_add <= 0:
+                    break
+            if posts_to_add <= 0:
+                break
+        back_data.setdefault('time_goal_fulltext', 0.0)
+        back_data['time_goal_fulltext'] += time.time() - time_goal_fulltext_start
+
+    time_goal_matched_start = time.time()
     matched_posts = await db.post.find_many(where={'id': {'in': list(matched_ids_score.keys())}}, include={'tags': True})
+    back_data['time_goal_matched'] = time.time() - time_goal_matched_start
 
-    back_data['time_goal_matched'] = time.time()
-
+    time_goal_eval_start = time.time()
     search_latest = datetime.now(tz=timezone.utc)
     search_earliest = search_latest - timedelta(days=7)
 
@@ -289,7 +307,7 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
         # Adjust score according to the search query
         post_score_adjustment = evaluate_ast(parse_query(fulltext), post, strict=strict_search)
         matched_ids_score[post.id] *= post_score_adjustment if post_score_adjustment is not None else 1
-    back_data['time_goal_eval'] = time.time()
+    back_data['time_goal_eval'] = time.time() - time_goal_eval_start
 
     matched_posts = filter(lambda x: matched_ids_score[x.id] >= min_score, matched_posts)
     matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)[:count]
@@ -297,12 +315,11 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
     
-    print(f'[*] Search time DB {int(-1000 * (back_data["time_start"] - back_data["time_goal_db"]))}ms')
-    print(f'[*] Search time contents {int(-1000 * (back_data["time_goal_db"] - back_data["time_goal_content"]))}ms')
-    print(f'[*] Search time fulltext {int(-1000 * (back_data["time_goal_content"] - back_data["time_goal_fulltext"]))}ms')
-    print(f'[*] Search time matched {int(-1000 * (back_data["time_goal_fulltext"] - back_data["time_goal_matched"]))}ms')
-    print(f'[*] Search time eval {int(-1000 * (back_data["time_goal_matched"] - back_data["time_goal_eval"]))}ms')
-    print(f'[*] Search time end {int(-1000 * (back_data["time_goal_eval"] - back_data["time_end"]))}ms')
+    print(f'[*] Search time DB {int(1000 * back_data["time_goal_db"])}ms')
+    print(f'[*] Search time contents {int(1000 * back_data["time_goal_content"])}ms')
+    print(f'[*] Search time fulltext {int(1000 * back_data["time_goal_fulltext"])}ms')
+    print(f'[*] Search time matched {int(1000 * back_data["time_goal_matched"])}ms')
+    print(f'[*] Search time eval {int(1000 * back_data["time_goal_eval"])}ms')
     print(f'[*] Search time total {int(-1000 * back_data["time_total"])}ms')
     print(f'[*] Search results {len(result)}')
 
