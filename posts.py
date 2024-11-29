@@ -321,12 +321,12 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
         for i, post in enumerate(untagged_posts):
             print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
             post_content = post.content_txt[:1000]
-            print("[?]", post_content)
+            print("[?]", post_content.replace('\n', ' '))
 
             tag_names = set(re.findall(r'#\w+', post_content))
 
             if len(post_content.split()) > 15:
-                tag_names.update(set(prompt_tags(post_content)))
+                tag_names.update(sorted(set(prompt_tags(post_content)), key=len)[:7])
 
             tag_names = {x.upper() for x in tag_names}
             print("[-]", tag_names)

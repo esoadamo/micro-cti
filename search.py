@@ -231,6 +231,13 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
         search_earliest = search_latest - timedelta(days=7)
         final_query = f"!from:{search_earliest.strftime('%Y-%m-%d')} {final_query}"
 
+    search_timespan_hard = search_latest - search_earliest
+    search_latest_hard = search_latest + search_timespan_hard
+    search_earliest_hard = search_earliest - search_timespan_hard
+    if strict_search:
+        search_latest_hard = search_latest
+        search_earliest_hard = search_earliest
+
     if fast_search and strict_search:
         raise ParseError("Fast search and strict search cannot be combined")
 
@@ -264,14 +271,14 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
                     term
                 ))
         else:
-            additional_where = {}
-            if strict_search:
-                additional_where['created_at'] = {'gte': search_earliest, 'lte': search_latest}
-
             posts = await PostSearchable.prisma(client=db).find_many(
                 where={
-                    'is_hidden': False, 'id': {'lte': post_max_id},
-                    **additional_where
+                    'is_hidden': False,
+                    'id': {'lte': post_max_id},
+                    'OR': [
+                        {'created_at': {'gte': search_earliest_hard, 'lte': search_latest_hard}},
+                        {'fetched_at': {'gte': search_earliest_hard, 'lte': search_latest_hard}}
+                    ]
                 },
                 take=SEARCH_FETCH_STEP,
                 order={'id': 'desc'}
