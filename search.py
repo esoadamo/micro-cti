@@ -3,7 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from typing import List, Tuple, Union, Iterable, Optional, Dict, Set
+from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
 
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
@@ -51,6 +51,20 @@ SEARCH_FETCH_STEP = 1000
 class PostSearchable(BasePost):
     id: int
     content_search: Optional[str]
+
+
+class SearchCommands(TypedDict):
+    fulltext: str
+    strict_search: bool
+    fast_search: bool
+    min_score: int
+    count: int
+    search_latest: datetime
+    search_earliest: datetime
+    search_latest_hard: datetime
+    search_earliest_hard: datetime
+    final_query: str
+    results_max: int
 
 
 @v_args(inline=True)
@@ -189,11 +203,8 @@ def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tu
     return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
 
 
-async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
-    print(f"[*] Search started {fulltext=} {count=} {min_score=}")
+def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -> SearchCommands:
     final_query = fulltext
-    back_data = back_data if back_data is not None else {}
-    back_data['time_start'] = time.time()
 
     strict_search = False
     fast_search = False
@@ -242,13 +253,52 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     if search_earliest is None:
         search_earliest = search_latest - timedelta(days=7)
         final_query = f"!from:{search_earliest.strftime('%Y-%m-%d')} {final_query}"
+    search_earliest.replace(hour=0, minute=0, second=0)
 
-    search_timespan_hard = search_latest - search_earliest
+    search_timespan_hard = (search_latest - search_earliest) * 0.5
     search_latest_hard = search_latest + search_timespan_hard
     search_earliest_hard = search_earliest - search_timespan_hard
     if strict_search:
         search_latest_hard = search_latest
         search_earliest_hard = search_earliest
+
+    assert search_latest is not None
+    assert search_earliest is not None
+    assert search_latest_hard is not None
+    assert search_earliest_hard is not None
+
+    return {
+        'fulltext': fulltext,
+        'strict_search': strict_search,
+        'fast_search': fast_search,
+        'min_score': min_score,
+        'count': count,
+        'search_latest': search_latest,
+        'search_earliest': search_earliest,
+        'search_latest_hard': search_latest_hard,
+        'search_earliest_hard': search_earliest_hard,
+        'final_query': final_query,
+        'results_max': results_max
+    }
+
+
+async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
+    print(f"[*] Search started {fulltext=} {count=} {min_score=}")
+    back_data = back_data if back_data is not None else {}
+    back_data['time_start'] = time.time()
+
+    search_commands = parse_search_commands(fulltext, count=count, min_score=min_score)
+    fulltext = search_commands['fulltext']
+    strict_search = search_commands['strict_search']
+    fast_search = search_commands['fast_search']
+    min_score = search_commands['min_score']
+    count = search_commands['count']
+    search_latest = search_commands['search_latest']
+    search_earliest = search_commands['search_earliest']
+    search_latest_hard = search_commands['search_latest_hard']
+    search_earliest_hard = search_commands['search_earliest_hard']
+    final_query = search_commands['final_query']
+    results_max = search_commands['results_max']
 
     if fast_search and strict_search:
         raise ParseError("Fast search and strict search cannot be combined")
@@ -377,13 +427,13 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
     back_data['query'] = final_query
-    
-    print(f'[*] Search time DB {int(1000 * back_data["time_goal_db"])}ms')
-    print(f'[*] Search time contents {int(1000 * back_data["time_goal_content"])}ms')
-    print(f'[*] Search time fulltext {int(1000 * back_data["time_goal_fulltext"])}ms')
-    print(f'[*] Search time matched {int(1000 * back_data["time_goal_matched"])}ms')
-    print(f'[*] Search time eval {int(1000 * back_data["time_goal_eval"])}ms')
-    print(f'[*] Search time total {int(-1000 * back_data["time_total"])}ms')
+
+    print(f'[*] Search time DB {int(1000 * back_data.get("time_goal_db", 0))}ms')
+    print(f'[*] Search time contents {int(1000 * back_data.get("time_goal_content", 0))}ms')
+    print(f'[*] Search time fulltext {int(1000 * back_data.get("time_goal_fulltext", 0))}ms')
+    print(f'[*] Search time matched {int(1000 * back_data.get("time_goal_matched", 0))}ms')
+    print(f'[*] Search time eval {int(1000 * back_data.get("time_goal_eval", 0))}ms')
+    print(f'[*] Search time total {int(1000 * back_data.get("time_total", 0))}ms')
     print(f'[*] Search results {len(result)}')
 
     return result

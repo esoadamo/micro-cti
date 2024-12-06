@@ -1,0 +1,125 @@
+{% extends "search_base.html" %}
+{% block head %}
+{%raw%}
+<script>
+
+    /**
+     * @typedef {{uid: string, url: string, excerpt: string, source: string, user: string, created: string, score: number, tags: {name: string, color: string}[]}} Post
+     */
+
+    /**
+     * Create a post element.
+     * @param data {Post} The post data.
+     * @returns {HTMLLIElement} The post element.
+     */
+    function createPost(data) {
+        const elementId = `post-${data.uid}`;
+        if (document.getElementById(elementId)) {
+            return document.getElementById(elementId);
+        }
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = data.url;
+        a.target = '_blank';
+        a.textContent = data.excerpt + '...';
+        li.appendChild(a);
+        li.appendChild(document.createTextNode(` (${data.source}:${data.user}, ${data.created}, ${data.score})`));
+        if (data.tags) {
+            const br = document.createElement('br');
+            li.appendChild(br);
+            const div = document.createElement('div');
+            div.className = 'tags';
+            for (const tag of data.tags) {
+                const span = document.createElement('span');
+                span.className = 'tag';
+                span.style.color = tag.color;
+                span.textContent = tag.name;
+                div.appendChild(span);
+            }
+            li.appendChild(div);
+        }
+        li.id = elementId;
+        li.dataset.score = `${data.score}`;
+        li.dataset.created = `${data.created}`;
+        return li;
+    }
+
+    function sortPosts() {
+        /** @type {HTMLUListElement} */
+        const postsContainer = document.querySelector('.posts');
+        const posts = Array.from(postsContainer.children);
+        posts.sort((a, b) => {
+            const scoreA = Number(a.dataset.score);
+            const scoreB = Number(b.dataset.score);
+            if (scoreA === scoreB) {
+                const createdA = new Date(a.dataset.created);
+                const createdB = new Date(b.dataset.created);
+                return createdB - createdA;
+            }
+            return scoreB - scoreA;
+        });
+        for (const post of posts) {
+            postsContainer.appendChild(post);
+        }
+    }
+
+    /**
+     * Fetch dynamic queries.
+     * @param query {string} The query.
+     * @returns {Promise<{query: string, subqueries: string[]}>} The dynamic queries.
+     */
+    async function fetchDynamicQueries(query) {
+        const response = await fetch(`/api/dynamic-queries?q=${query}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch dynamic queries.');
+        }
+        return await response.json();
+    }
+
+    /**
+     *
+     * @param query {string} The search query.
+     */
+    async function search(query) {
+        const postsContainer = document.querySelector('.posts');
+        postsContainer.innerHTML = '';
+        const queries = await fetchDynamicQueries(query);
+        document.querySelector('#search').value = queries.query;
+        for (const query of queries.subqueries) {
+            document.querySelector('#subquery').textContent = `Currently running: ${query}`;
+            const response = await fetch(`/api/search?q=${query}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch search results.');
+            }
+            /** @type {{posts: Post[]}} */
+            const data = await response.json();
+            for (const post of data.posts) {
+                postsContainer.appendChild(createPost(post));
+            }
+            sortPosts();
+        }
+        document.querySelector('#subquery').textContent = '';
+    }
+
+    window.addEventListener('load', () => {
+        /** @type {HTMLFormElement} */
+        const form = document.getElementById('form-search');
+        form.action = '/search/dynamic';
+
+        if (window.location.search) {
+            const query = new URLSearchParams(window.location.search).get('q');
+            if (query) {
+                search(query);
+            }
+        }
+    });
+</script>
+{%endraw%}
+{% endblock %}
+{% block content %}
+<div style="color: blue" id="subquery"></div>
+<ul class="posts">
+</ul>
+{% endblock %}
+{% block no_results %}
+{% endblock %}
