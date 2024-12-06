@@ -44,9 +44,11 @@
             margin-left: 8px;
         }
     </style>
+    {%block head%}
+    {% endblock %}
 </head>
 
-<form action="/search">
+<form id="form-search" action="/search">
     <input id="search" name="q" value="{{search_term|escape}}" aria-label="Search term" placeholder="Search">
 </form>
 
@@ -54,15 +56,20 @@
 <pre style="color: red">{{error|escape}}</pre>
 {% endif %}
 
+{% block content %}
+{% endblock %}
+
 {% if results %}
-<ul>
+<ul class="posts">
 {%block results%}
 {% endblock %}
 </ul>
 
 {% elif search_term %}
 
+{% block no_results %}
 <pre style="color: red">Your search has returned 0 results.</pre>
+{% endblock %}
 
 {% else %}
 

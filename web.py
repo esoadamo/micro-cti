@@ -1,6 +1,8 @@
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import format_datetime as format_rfc2822
+from hashlib import md5
 from typing import List, Optional
 from typing_extensions import TypedDict
 
@@ -13,7 +15,7 @@ from starlette.templating import _TemplateResponse
 
 from ioc import search_iocs, IoCLink
 from posts import get_latest_ingestion_time
-from search import search_posts
+from search import search_posts, parse_search_commands
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -25,6 +27,11 @@ class IoCSearchResponse(TypedDict):
     latest_ingestion_time: Optional[datetime]
 
 
+class PostSearchTags(TypedDict):
+    name: str
+    color: str
+
+
 class PostSearch(TypedDict):
     user: str
     source: str
@@ -32,11 +39,19 @@ class PostSearch(TypedDict):
     created: datetime
     url: str
     score: float
+    uid: str
+    tags: List[PostSearchTags]
 
 
 class PostSearchResponse(TypedDict):
     search_term: str
     posts: List[PostSearch]
+
+
+class ApiDynamicQueriesResponse(TypedDict):
+    query: str
+    commands: dict
+    subqueries: List[str]
 
 
 def render_template(filename, request, headers=None, **context):
@@ -71,6 +86,18 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
         error=error,
         time_render=time_delta_ms,
         search_count=search_back_data.get('cnt_search', 0)
+    )
+
+
+@app.get("/search/dynamic/", response_class=HTMLResponse)
+async def app_search(request: Request, q: str = "") -> _TemplateResponse:
+    search_term = q
+    return render_template(
+        'search_posts_dynamic.html',
+        request,
+        search_term=search_term,
+        latest_ingestion_time=await get_latest_ingestion_time(),
+        time_render=0
     )
 
 
@@ -118,7 +145,9 @@ async def app_api_search(q: str) -> PostSearchResponse:
             'excerpt': post.content_txt[:90],
             'created': post.created_at,
             'url': post.url,
-            'score': score
+            'score': score,
+            'tags': [{'name': tag.name, 'color': tag.color} for tag in post.tags],
+            'uid': md5((post.source + post.source_id).encode()).hexdigest()
         })
 
     return {
@@ -126,6 +155,30 @@ async def app_api_search(q: str) -> PostSearchResponse:
         'posts': posts_response
     }
 
+
+@app.get('/api/dynamic-queries')
+async def app_dynamic_queries(q: str) -> ApiDynamicQueriesResponse:
+    commands = parse_search_commands(q)
+    search_latest = commands['search_latest']
+    search_earliest = commands['search_earliest']
+    base_query = commands['final_query']
+    queries: List[str] = []
+
+    step = timedelta(days=7)
+    while search_latest > search_earliest:
+        search_earliest_curr = max(search_latest - step, search_earliest)
+        query = base_query
+        query = re.sub('!from:([0-9]{4}-[0-9]{2}-[0-9]{2})', f'!from:{search_earliest_curr.strftime("%Y-%m-%d")}', query)
+        query = re.sub('!to:([0-9]{4}-[0-9]{2}-[0-9]{2})', f'!to:{search_latest.strftime("%Y-%m-%d")}', query)
+        queries.append(query)
+
+        search_latest -= step
+
+    return {
+        'query': base_query,
+        'commands': commands,
+        'subqueries': queries
+    }
 
 
 @app.get("/favicon.svg", response_class=FileResponse)
