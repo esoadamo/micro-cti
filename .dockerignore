@@ -11,3 +11,5 @@ docker-compose.yaml
 *.log
 .git
 .gitignore
+telegram.session
+

@@ -8,3 +8,5 @@ pyairtable
 lark
 atproto
 feedparser
+telethon
+markdown

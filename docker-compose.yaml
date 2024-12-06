@@ -11,6 +11,7 @@ services:
     volumes:
       - ./posts.jsonl:/app/posts.jsonl:ro
       - ./config.toml:/app/config.toml:ro
+      - ./telegram.session:/app/telegram.session
 
   micro-cti-db:
     image: mariadb:lts
