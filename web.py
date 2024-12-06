@@ -25,6 +25,20 @@ class IoCSearchResponse(TypedDict):
     latest_ingestion_time: Optional[datetime]
 
 
+class PostSearch(TypedDict):
+    user: str
+    source: str
+    excerpt: str
+    created: datetime
+    url: str
+    score: float
+
+
+class PostSearchResponse(TypedDict):
+    search_term: str
+    posts: List[PostSearch]
+
+
 def render_template(filename, request, headers=None, **context):
     return templates.TemplateResponse(
         request=request, name=filename, context=context,
@@ -61,7 +75,7 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
 
 
 @app.get("/ioc/search/")
-async def app_search(q: str) -> IoCSearchResponse:
+async def app_ioc_search(q: str) -> IoCSearchResponse:
     search_term = q
     iocs = await search_iocs(search_term)
     return {
@@ -72,7 +86,7 @@ async def app_search(q: str) -> IoCSearchResponse:
 
 
 @app.get("/rss/", response_class=PlainTextResponse)
-async def app_search(request: Request, q: str = "") -> _TemplateResponse:
+async def app_rss(request: Request, q: str = "") -> _TemplateResponse:
     search_term = q
     posts = []
 
@@ -89,6 +103,29 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
         latest_ingestion_time=await get_latest_ingestion_time(),
         format_rfc2822=format_rfc2822
     )
+
+
+@app.get("/api/search")
+async def app_api_search(q: str) -> PostSearchResponse:
+    search_term = q
+    posts = await search_posts(search_term)
+
+    posts_response: List[PostSearch] = []
+    for post, score in posts:
+        posts_response.append({
+            'user': post.user,
+            'source': post.source,
+            'excerpt': post.content_txt[:90],
+            'created': post.created_at,
+            'url': post.url,
+            'score': score
+        })
+
+    return {
+        'search_term': search_term,
+        'posts': posts_response
+    }
+
 
 
 @app.get("/favicon.svg", response_class=FileResponse)
