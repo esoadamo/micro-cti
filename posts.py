@@ -5,14 +5,16 @@ import time
 import tomllib
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
-from typing import AsyncIterable, Optional, Tuple, List
+from typing import AsyncIterable, Optional, Tuple, List, Set
 
 import atproto
 import feedparser
 import pyairtable
 from bs4 import BeautifulSoup
+from markdown import markdown
 from mastodon import Mastodon
 from prisma.models import Post
+from telethon import TelegramClient
 
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from db import get_db, json_serial
@@ -40,6 +42,11 @@ def get_bluesky_secrets() -> dict:
         return tomllib.load(f)["bluesky"]
 
 
+def get_telegram_secrets() -> dict:
+    with open("config.toml", 'rb') as f:
+        return tomllib.load(f)["telegram"]
+
+
 def get_rss_feeds() -> List[dict]:
     with open("config.toml", 'rb') as f:
         try:
@@ -47,6 +54,11 @@ def get_rss_feeds() -> List[dict]:
             return list(feeds.values())
         except KeyError:
             return []
+
+
+def get_telegram_instance() -> Tuple[TelegramClient, Set[str]]:
+    secrets = get_telegram_secrets()
+    return TelegramClient('telegram', secrets['api_id'], secrets['api_hash']), set(secrets['chats'])
 
 
 def get_mastodon_instance() -> Mastodon:
@@ -88,6 +100,11 @@ def read_html(content: str) -> str:
     # Fix spaces before hashtags
     text = re.sub(r'#\s+(\w)', r'#\1', text)
     return text.strip()
+
+
+def read_markdown(content: str) -> str:
+    html = markdown(content)
+    return read_html(html)
 
 
 async def get_rss_posts() -> AsyncIterable[Post]:
@@ -139,6 +156,47 @@ async def get_rss_posts() -> AsyncIterable[Post]:
             exceptions.append(e)
     if exceptions:
         raise FetchError("Error fetching RSS feeds", exceptions)
+
+
+async def get_telegram_posts() -> AsyncIterable[Post]:
+    try:
+        telegram, chats = get_telegram_instance()
+        db = await get_db()
+        async with telegram as client:
+            for dialog in await client.get_dialogs():
+                if dialog.name not in chats:
+                    continue
+                if dialog.unread_count > 0:  # Check for unread messages
+                    messages = await client.get_messages(dialog.entity, limit=dialog.unread_count)
+                    for message in reversed(messages):
+                        url = f"https://t.me/c/{dialog.entity.id}/{message.id}"
+                        content_html = message.text
+                        content_txt = read_markdown(content_html)
+                        created_at = message.date
+                        source = "telegram"
+                        source_id = str(message.id)
+                        raw = {'url': url, 'content': content_html, 'created_at': created_at, 'source': source, 'sender_id': message.sender_id}
+                        if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                            post = await db.post.create({
+                                'source': source,
+                                'source_id': source_id,
+                                'user': dialog.name,
+                                'url': url,
+                                'created_at': created_at,
+                                'fetched_at': datetime.now(tz=timezone.utc),
+                                'content_html': content_html,
+                                'content_txt': content_txt,
+                                'is_hidden': len(content_txt.split()) < 3,
+                                'raw': json.dumps(raw, default=json_serial)
+                            })
+                            if not post.is_hidden:
+                                await hide_post_if_not_about_cybersecurity(post)
+                            if not post.is_hidden:
+                                await format_post_for_search(post, regenerate=True)
+                            yield await db.post.find_unique(where={'id': post.id})
+                    await client.send_read_acknowledge(dialog.entity)
+    except AssertionError as e:
+        raise FetchError("Error fetching Telegram posts", [e])
 
 
 async def get_bluesky_posts() -> AsyncIterable[any]:
@@ -311,9 +369,12 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
 
 async def generate_tags(ids: Optional[List[int]] = None) -> None:
     try:
+        if not ids and ids is not None:
+            return  # Nothing to tag
         db = await get_db()
         posts_where_filter = {'tags_assigned': False, 'is_hidden': False}
         if ids:
+            assert ids is not None  # Pyright
             posts_where_filter['id'] = {'in': ids}
         untagged_posts = await db.post.find_many(where=posts_where_filter)
         print(f'[*] found {len(untagged_posts)} posts to tag')

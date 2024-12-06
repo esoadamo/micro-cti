@@ -201,7 +201,15 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     search_latest: Optional[datetime] = None
     search_earliest: Optional[datetime] = None
 
-    for command, param in (('strict', None), ('fast', None), ('min_score', r'\d+'), ('count', r'\d+'), ('from', r'\d{4}-\d{2}-\d{2}'), ('to', r'\d{4}-\d{2}-\d{2}')):
+    for command, param in (
+            ('strict', None),
+            ('fast', None),
+            ('min_score', r'\d+'),
+            ('count', r'\d+'),
+            ('from', r'\d{4}-\d{2}-\d{2}'),
+            ('to', r'\d{4}-\d{2}-\d{2}'),
+            ('age', r'\d+'),
+    ):
         command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
         command_search = re.match(command_re, fulltext)
         if not command_search:
@@ -223,10 +231,14 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
             case "to":
                 search_latest = datetime.fromisoformat(param_value)
                 search_latest = search_latest.replace(tzinfo=timezone.utc)
+            case "age":
+                search_latest = datetime.now(tz=timezone.utc)
+                search_earliest = search_latest - timedelta(days=int(param_value))
 
     if search_latest is None:
         search_latest = datetime.now(tz=timezone.utc)
         final_query = f"!to:{search_latest.strftime('%Y-%m-%d')} {final_query}"
+    search_latest.replace(hour=23, minute=59, second=59)
     if search_earliest is None:
         search_earliest = search_latest - timedelta(days=7)
         final_query = f"!from:{search_earliest.strftime('%Y-%m-%d')} {final_query}"
@@ -271,6 +283,8 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
                     term
                 ))
         else:
+            assert search_latest_hard is not None
+            assert search_earliest_hard is not None
             posts = await PostSearchable.prisma(client=db).find_many(
                 where={
                     'is_hidden': False,
