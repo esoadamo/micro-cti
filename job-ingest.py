@@ -6,7 +6,8 @@ from typing import List, AsyncIterable
 from prisma.models import Post
 
 from db import get_db
-from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError
+from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
+    get_telegram_posts
 
 
 def print_post(post: Post):
@@ -45,6 +46,7 @@ async def main() -> int:
     db = await get_db()
 
     exceptions_2d = await asyncio.gather(
+        fetch_posts('Telegram', get_telegram_posts),
         fetch_posts('RSS', get_rss_posts),
         fetch_posts('Mastodon', get_mastodon_posts),
         fetch_posts('Airtable', get_airtable_posts),
