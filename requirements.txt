@@ -10,3 +10,4 @@ atproto
 feedparser
 telethon
 markdown
+tomli-w
