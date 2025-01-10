@@ -97,4 +97,4 @@ of the post is shown and you are more than encouranged to visit the original sou
 
 {% endif %}
 
-<footer>Latest data ingested at {{latest_ingestion_time}}, took {{time_render}} ms to render {{search_count}} searches.</footer>
+<footer>{% if latest_ingestion_time %}Latest data ingested at {{latest_ingestion_time}}. {% endif %}Took {{time_render}} ms to render {{search_count}} searches.</footer>

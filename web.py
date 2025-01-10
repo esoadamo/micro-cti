@@ -69,10 +69,12 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
     posts = []
     search_back_data = {}
     error = ""
+    latest_ingestion_time = None
 
     if search_term:
         try:
             posts = await search_posts(search_term, back_data=search_back_data)
+            latest_ingestion_time = await get_latest_ingestion_time()
         except ParseError as e:
             error = str(e)
 
@@ -82,7 +84,7 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
         request,
         results=posts,
         search_term=search_back_data.get('query', search_term),
-        latest_ingestion_time=await get_latest_ingestion_time(),
+        latest_ingestion_time=latest_ingestion_time,
         error=error,
         time_render=time_delta_ms,
         search_count=search_back_data.get('cnt_search', 0)
@@ -96,7 +98,7 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
         'search_posts_dynamic.html',
         request,
         search_term=search_term,
-        latest_ingestion_time=await get_latest_ingestion_time(),
+        latest_ingestion_time=None,
         time_render=0
     )
 
