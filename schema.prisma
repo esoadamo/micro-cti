@@ -48,3 +48,10 @@ model IoC {
 
   @@unique([type, subtype, value])
 }
+
+model SearchCache {
+  id         Int      @id @default(autoincrement())
+  query      String   @db.Text
+  data       String   @db.Text
+  expires_at DateTime
+}
