@@ -1,6 +1,9 @@
 import itertools
 import re
 import time
+import pickle
+import base64
+import gzip
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
@@ -8,7 +11,7 @@ from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
 from lark import Lark, Transformer, v_args, ParseError
-from prisma.bases import BasePost
+from prisma.bases import BasePost, BaseSearchCache
 from prisma.models import Post
 
 from db import get_db
@@ -51,6 +54,12 @@ SEARCH_FETCH_STEP = 1000
 class PostSearchable(BasePost):
     id: int
     content_search: Optional[str]
+
+
+class SearchCacheMeta(BaseSearchCache):
+    id: int
+    query: str
+    expires_at: datetime
 
 
 class SearchCommands(TypedDict):
@@ -282,7 +291,13 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     }
 
 
-async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back_data: Optional[dict] = None) -> List[Tuple[Post, int]]:
+async def search_posts(
+        fulltext: str,
+        count: int = 40,
+        min_score: int = 15,
+        back_data: Optional[dict] = None,
+        cache_seconds: int = 3600
+) -> List[Tuple[Post, int]]:
     print(f"[*] Search started {fulltext=} {count=} {min_score=}")
     back_data = back_data if back_data is not None else {}
     back_data['time_start'] = time.time()
@@ -299,6 +314,14 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     search_earliest_hard = search_commands['search_earliest_hard']
     final_query = search_commands['final_query']
     results_max = search_commands['results_max']
+    db = await get_db()
+
+    if cache_seconds:
+        cached_search = await SearchCacheMeta.prisma(client=db).find_first(where={'query': final_query})
+        if cached_search and cached_search.expires_at > datetime.now(tz=timezone.utc):
+            print(f"[*] Search cache hit {final_query=}")
+            cached_search_data = await db.searchcache.find_unique(where={'id': cached_search.id})
+            return pickle.loads(gzip.decompress(base64.b64decode(cached_search_data.data)))
 
     if fast_search and strict_search:
         raise ParseError("Fast search and strict search cannot be combined")
@@ -315,7 +338,6 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     for term in search_terms:
         print(f'[*] subsearch {term=}')
 
-    db = await get_db()
     post_max_id = (await db.post.find_first(order={'id': 'desc'})).id
     matched_ids_score: Dict[int, float] = {}
     while True:
@@ -428,12 +450,26 @@ async def search_posts(fulltext: str, count: int = 40, min_score: int = 15, back
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
     back_data['query'] = final_query
 
+    if cache_seconds:
+        time_goal_cache_start = time.time()
+        cache_data = base64.b64encode(gzip.compress(pickle.dumps(result))).decode('ascii')
+        cache_existing = await SearchCacheMeta.prisma(client=db).find_first(where={'query': final_query})
+        if cache_existing:
+            await db.searchcache.delete(where={'id': cache_existing.id})
+        await SearchCacheMeta.prisma(client=db).create(data={
+            'query': final_query,
+            'expires_at': datetime.now(tz=timezone.utc) + timedelta(seconds=cache_seconds),
+            'data': cache_data
+        })
+        back_data['time_goal_cache'] = time.time() - time_goal_cache_start
+
     print(f'[*] Search time DB {int(1000 * back_data.get("time_goal_db", 0))}ms')
     print(f'[*] Search time contents {int(1000 * back_data.get("time_goal_content", 0))}ms')
     print(f'[*] Search time fulltext {int(1000 * back_data.get("time_goal_fulltext", 0))}ms')
     print(f'[*] Search time matched {int(1000 * back_data.get("time_goal_matched", 0))}ms')
     print(f'[*] Search time eval {int(1000 * back_data.get("time_goal_eval", 0))}ms')
     print(f'[*] Search time total {int(1000 * back_data.get("time_total", 0))}ms')
+    print(f'[*] Search time cache {int(1000 * back_data.get("time_goal_cache", 0))}ms')
     print(f'[*] Search results {len(result)}')
 
     return result
