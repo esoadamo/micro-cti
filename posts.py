@@ -368,6 +368,8 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
 
 
 async def generate_tags(ids: Optional[List[int]] = None) -> None:
+    errors = []
+
     try:
         if not ids and ids is not None:
             return  # Nothing to tag
@@ -380,27 +382,34 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
         print(f'[*] found {len(untagged_posts)} posts to tag')
 
         for i, post in enumerate(untagged_posts):
-            print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
-            post_content = post.content_txt[:1000]
-            print("[?]", post_content.replace('\n', ' '))
+            try:
+                print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
+                post_content = post.content_txt[:1000]
+                print("[?]", post_content.replace('\n', ' '))
 
-            tag_names = set(re.findall(r'#\w+', post_content))
+                tag_names = set(re.findall(r'#\w+', post_content))
 
-            if len(post_content.split()) > 15:
-                tag_names.update(sorted(set(prompt_tags(post_content)), key=len)[:7])
+                if len(post_content.split()) > 15:
+                    tag_names.update(sorted(set(prompt_tags(post_content)), key=len)[:7])
 
-            tag_names = {x.upper() for x in tag_names}
-            print("[-]", tag_names)
+                tag_names = {x.upper() for x in tag_names}
+                print("[-]", tag_names)
 
-            tags = [await db.tag.upsert(where={"name": tag_name},
-                                        data={'create': {"name": tag_name, "color": generate_random_color()},
-                                              'update': {}})
-                    for tag_name in tag_names]
-            await db.post.update(where={'id': post.id},
-                                 data={'tags_assigned': True, 'tags': {'connect': [{"id": tag.id} for tag in tags]}})
-            await format_post_for_search(post, regenerate=True)
+                tags = [await db.tag.upsert(where={"name": tag_name},
+                                            data={'create': {"name": tag_name, "color": generate_random_color()},
+                                                  'update': {}})
+                        for tag_name in tag_names]
+                await db.post.update(where={'id': post.id},
+                                     data={'tags_assigned': True,
+                                           'tags': {'connect': [{"id": tag.id} for tag in tags]}})
+                await format_post_for_search(post, regenerate=True)
+            except Exception as e:
+                errors.append(FetchError(f"Error generating tags for {post.id}", [e]))
     except Exception as e:
-        raise FetchError("Error generating tags", [e])
+        errors.append(FetchError("Error generating tags", [e]))
+
+    if errors:
+        raise FetchError("Error generating tags", errors)
 
 
 async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = False) -> bool:
