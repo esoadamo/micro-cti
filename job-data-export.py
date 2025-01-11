@@ -1,4 +1,5 @@
 from pathlib import Path
+import gzip
 import asyncio
 
 from db import get_db
@@ -10,9 +11,9 @@ async def main() -> None:
     print('[*] Database connected')
     step = 1000
     curr_id = 0
-    file_backup = Path('posts.jsonl')
+    file_backup = Path('posts.jsonl.gz')
 
-    with file_backup.open('w') as f:
+    with gzip.open(file_backup, 'wt') as f:
         while True:
             print(f'[*] Next batch starting from id: {curr_id}\r', end='', flush=True)
             posts = await db.post.find_many(
