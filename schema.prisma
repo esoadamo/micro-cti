@@ -27,6 +27,8 @@ model Post {
   tags           Tag[]    @relation("PostTags")
   iocs           IoC[]    @relation("PostIoCs")
 
+  @@index([created_at])
+  @@index([fetched_at])
   @@fulltext([content_search])
 }
 
@@ -40,7 +42,7 @@ model Tag {
 model IoC {
   id      Int     @id @default(autoincrement())
   type    String  @db.VarChar(255)
-  subtype String?  @db.VarChar(255)
+  subtype String? @db.VarChar(255)
   value   String  @db.VarChar(512)
   posts   Post[]  @relation("PostIoCs")
 
