@@ -1,4 +1,5 @@
 from pathlib import Path
+import gzip
 import asyncio
 
 from prisma.models import Post
@@ -12,7 +13,7 @@ async def main() -> None:
     print('[*] Database connected')
     file_backup = Path('posts.jsonl')
 
-    with file_backup.open('r') as f:
+    with gzip.open(file_backup, 'rt') as f:
         while True:
             line = f.readline()
             if not line:
