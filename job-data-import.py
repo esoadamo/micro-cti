@@ -11,7 +11,7 @@ async def main() -> None:
     print('[*] Process started')
     db = await get_db()
     print('[*] Database connected')
-    file_backup = Path('posts.jsonl')
+    file_backup = Path('posts.jsonl.gz')
 
     with gzip.open(file_backup, 'rt') as f:
         while True:
@@ -25,7 +25,7 @@ async def main() -> None:
             tags = data['tags']
             del data['tags']
             del data['iocs']
-            post = await db.post.create(data=data)
+            post = await db.post.find_unique(where={'id': post.id}) or await db.post.create(data=data)
             if tags:
                 for tag in tags:
                     del tag['id']

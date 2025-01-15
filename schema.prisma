@@ -51,7 +51,8 @@ model IoC {
 
 model SearchCache {
   id         Int      @id @default(autoincrement())
+  query_hash String   @unique @db.VarChar(255)
   query      String   @db.Text
-  data       String   @db.Text
+  filepath   String   @unique @db.VarChar(512)
   expires_at DateTime
 }
