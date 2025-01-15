@@ -1,9 +1,6 @@
 import itertools
 import re
 import time
-import pickle
-import base64
-import gzip
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
@@ -11,10 +8,11 @@ from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
 from lark import Lark, Transformer, v_args, ParseError
-from prisma.bases import BasePost, BaseSearchCache
+from prisma.bases import BasePost
 from prisma.models import Post
 
 from db import get_db
+from search_cache import cache_fetch, cache_save
 
 SEARCH_GRAMMAR = r"""
 ?start: expr
@@ -54,12 +52,6 @@ SEARCH_FETCH_STEP = 1000
 class PostSearchable(BasePost):
     id: int
     content_search: Optional[str]
-
-
-class SearchCacheMeta(BaseSearchCache):
-    id: int
-    query: str
-    expires_at: datetime
 
 
 class SearchCommands(TypedDict):
@@ -317,11 +309,10 @@ async def search_posts(
     db = await get_db()
 
     if cache_seconds:
-        cached_search = await SearchCacheMeta.prisma(client=db).find_first(where={'query': final_query})
-        if cached_search and cached_search.expires_at > datetime.now(tz=timezone.utc):
+        cached_search = await cache_fetch(final_query)
+        if cached_search:
             print(f"[*] Search cache hit {final_query=}")
-            cached_search_data = await db.searchcache.find_unique(where={'id': cached_search.id})
-            return pickle.loads(gzip.decompress(base64.b64decode(cached_search_data.data)))
+            return cached_search
 
     if fast_search and strict_search:
         raise ParseError("Fast search and strict search cannot be combined")
@@ -452,15 +443,7 @@ async def search_posts(
 
     if cache_seconds:
         time_goal_cache_start = time.time()
-        cache_data = base64.b64encode(gzip.compress(pickle.dumps(result))).decode('ascii')
-        cache_existing = await SearchCacheMeta.prisma(client=db).find_first(where={'query': final_query})
-        if cache_existing:
-            await db.searchcache.delete(where={'id': cache_existing.id})
-        await SearchCacheMeta.prisma(client=db).create(data={
-            'query': final_query,
-            'expires_at': datetime.now(tz=timezone.utc) + timedelta(seconds=cache_seconds),
-            'data': cache_data
-        })
+        await cache_save(final_query, result, datetime.now(tz=timezone.utc) + timedelta(seconds=cache_seconds))
         back_data['time_goal_cache'] = time.time() - time_goal_cache_start
 
     print(f'[*] Search time DB {int(1000 * back_data.get("time_goal_db", 0))}ms')

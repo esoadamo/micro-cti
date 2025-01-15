@@ -378,7 +378,10 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
         if ids:
             assert ids is not None  # Pyright
             posts_where_filter['id'] = {'in': ids}
-        untagged_posts = await db.post.find_many(where=posts_where_filter)
+        untagged_posts = await db.post.find_many(
+            where=posts_where_filter,
+            order={'id': 'desc'}
+        )
         print(f'[*] found {len(untagged_posts)} posts to tag')
 
         for i, post in enumerate(untagged_posts):
