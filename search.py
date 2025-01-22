@@ -57,7 +57,6 @@ class PostSearchable(BasePost):
 class SearchCommands(TypedDict):
     fulltext: str
     strict_search: bool
-    fast_search: bool
     min_score: int
     count: int
     search_latest: datetime
@@ -208,14 +207,12 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     final_query = fulltext
 
     strict_search = False
-    fast_search = False
     results_max = 100
     search_latest: Optional[datetime] = None
     search_earliest: Optional[datetime] = None
 
     for command, param in (
             ('strict', None),
-            ('fast', None),
             ('min_score', r'\d+'),
             ('count', r'\d+'),
             ('from', r'\d{4}-\d{2}-\d{2}'),
@@ -231,8 +228,6 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
         match command:
             case "strict":
                 strict_search = True
-            case "fast":
-                fast_search = True
             case "min_score":
                 min_score = int(param_value)
             case "count":
@@ -271,7 +266,6 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     return {
         'fulltext': fulltext,
         'strict_search': strict_search,
-        'fast_search': fast_search,
         'min_score': min_score,
         'count': count,
         'search_latest': search_latest,
@@ -297,7 +291,6 @@ async def search_posts(
     search_commands = parse_search_commands(fulltext, count=count, min_score=min_score)
     fulltext = search_commands['fulltext']
     strict_search = search_commands['strict_search']
-    fast_search = search_commands['fast_search']
     min_score = search_commands['min_score']
     count = search_commands['count']
     search_latest = search_commands['search_latest']
@@ -314,9 +307,6 @@ async def search_posts(
             print(f"[*] Search cache hit {final_query=}")
             return cached_search
 
-    if fast_search and strict_search:
-        raise ParseError("Fast search and strict search cannot be combined")
-
     fulltext = re.sub(r"\s+", " ", fulltext)
     print(f"[*] Search commands {fulltext=} {strict_search=} {min_score=} {count=}")
     
@@ -329,75 +319,56 @@ async def search_posts(
     for term in search_terms:
         print(f'[*] subsearch {term=}')
 
-    post_max_id = (await db.post.find_first(order={'id': 'desc'})).id
     matched_ids_score: Dict[int, float] = {}
-    while True:
-        time_db_start = time.time()
+    time_db_start = time.time()
+    posts = []
+    search_latest_hard_str = search_latest_hard.strftime('%Y-%m-%d')
+    search_earliest_hard_str = search_earliest_hard.strftime('%Y-%m-%d')
+    for term in search_terms:
+        # noinspection SqlNoDataSourceInspection
+        posts.extend(await PostSearchable.prisma(client=db).query_raw(
+            f"SELECT id, content_search "
+            f"FROM Post WHERE "
+            f"is_hidden = false "
+            f"AND MATCH(content_search) AGAINST(? IN NATURAL LANGUAGE MODE) "
+            f"AND (created_at BETWEEN '{search_earliest_hard_str}' AND '{search_latest_hard_str}') "
+            f"LIMIT {results_max * 10}",
+            term
+        ))
+    back_data.setdefault('time_goal_db', 0.0)
+    back_data['time_goal_db'] += time.time() - time_db_start
 
-        if fast_search:
-            # Fast search is done directly in the database
-            if matched_ids_score:
-                break  # Fast search runs only once
-            posts = []
-            for term in search_terms:
-                # noinspection SqlNoDataSourceInspection
-                posts.extend(await PostSearchable.prisma(client=db).query_raw(
-                    f"SELECT id, content_search FROM Post WHERE is_hidden = false AND MATCH(content_search) AGAINST(? IN NATURAL LANGUAGE MODE) LIMIT {results_max * 20}",
-                    term
-                ))
-        else:
-            assert search_latest_hard is not None
-            assert search_earliest_hard is not None
-            posts = await PostSearchable.prisma(client=db).find_many(
-                where={
-                    'is_hidden': False,
-                    'id': {'lte': post_max_id},
-                    'OR': [
-                        {'created_at': {'gte': search_earliest_hard, 'lte': search_latest_hard}},
-                        {'fetched_at': {'gte': search_earliest_hard, 'lte': search_latest_hard}}
-                    ]
-                },
-                take=SEARCH_FETCH_STEP,
-                order={'id': 'desc'}
-            )
-        back_data.setdefault('time_goal_db', 0.0)
-        back_data['time_goal_db'] += time.time() - time_db_start
+    time_goal_content_start = time.time()
+    post_contents = [(post.id, await format_post_for_search(post)) for post in posts]
+    back_data.setdefault('time_goal_content', 0.0)
+    back_data['time_goal_content'] += time.time() - time_goal_content_start
+    matched_ids_score_curr = {}
 
-        if not posts:
-            break
-        post_max_id = posts[-1].id - 1
+    time_goal_fulltext_start = time.time()
+    for term in search_terms:
+        back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
+        scorer = partial(post_fulltext_score, search_term=term)
+        post_scores = itertools.starmap(scorer, post_contents)
 
-        time_goal_content_start = time.time()
-        post_contents = [(post.id, await format_post_for_search(post)) for post in posts]
-        back_data.setdefault('time_goal_content', 0.0)
-        back_data['time_goal_content'] += time.time() - time_goal_content_start
-        matched_ids_score_curr = {}
+        for post_id, score in post_scores:
+            if score < min_score:
+                continue
+            matched_ids_score_curr[post_id] = max(matched_ids_score_curr.get(post_id, 0), score)
 
-        time_goal_fulltext_start = time.time()
-        for term in search_terms:
-            back_data['cnt_search'] = back_data.get('cnt_search', 0) + len(post_contents)
-            scorer = partial(post_fulltext_score, search_term=term)
-            post_scores = itertools.starmap(scorer, post_contents)
-
-            for post_id, score in post_scores:
-                if score < min_score:
-                    continue
-                matched_ids_score_curr[post_id] = max(matched_ids_score_curr.get(post_id, 0), score)
-
-        matched_scores_ids: Dict[float, Set[int]] = {}
-        for post_id, score in matched_ids_score_curr.items():
-            matched_scores_ids.setdefault(score, set()).add(post_id)
-        posts_to_add = count * 2
-        for score in sorted(matched_scores_ids.keys(), reverse=True):
-            for post_id in matched_scores_ids[score]:
-                matched_ids_score[post_id] = score
-                posts_to_add -= 1
-                if posts_to_add <= 0:
-                    break
+    matched_scores_ids: Dict[float, Set[int]] = {}
+    for post_id, score in matched_ids_score_curr.items():
+        matched_scores_ids.setdefault(score, set()).add(post_id)
+    posts_to_add = count * 2
+    for score in sorted(matched_scores_ids.keys(), reverse=True):
+        for post_id in matched_scores_ids[score]:
+            matched_ids_score[post_id] = score
+            posts_to_add -= 1
             if posts_to_add <= 0:
                 break
-        back_data.setdefault('time_goal_fulltext', 0.0)
-        back_data['time_goal_fulltext'] += time.time() - time_goal_fulltext_start
+        if posts_to_add <= 0:
+            break
+    back_data.setdefault('time_goal_fulltext', 0.0)
+    back_data['time_goal_fulltext'] += time.time() - time_goal_fulltext_start
 
     time_goal_matched_start = time.time()
     matched_posts = await db.post.find_many(where={'id': {'in': list(matched_ids_score.keys())}}, include={'tags': True})
