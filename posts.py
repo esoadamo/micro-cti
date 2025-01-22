@@ -159,44 +159,51 @@ async def get_rss_posts() -> AsyncIterable[Post]:
 
 
 async def get_telegram_posts() -> AsyncIterable[Post]:
+    errors = []
     try:
         telegram, chats = get_telegram_instance()
         db = await get_db()
         async with telegram as client:
-            for dialog in await client.get_dialogs():
+            async for dialog in client.iter_dialogs():
                 if dialog.name not in chats:
                     continue
+                messages_to_fetch = dialog.unread_count
                 if dialog.unread_count > 0:  # Check for unread messages
-                    messages = await client.get_messages(dialog.entity, limit=dialog.unread_count)
-                    for message in reversed(messages):
-                        url = f"https://t.me/c/{dialog.entity.id}/{message.id}"
-                        content_html = message.text
-                        content_txt = read_markdown(content_html)
-                        created_at = message.date
-                        source = "telegram"
-                        source_id = str(message.id)
-                        raw = {'url': url, 'content': content_html, 'created_at': created_at, 'source': source, 'sender_id': message.sender_id}
-                        if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                            post = await db.post.create({
-                                'source': source,
-                                'source_id': source_id,
-                                'user': dialog.name,
-                                'url': url,
-                                'created_at': created_at,
-                                'fetched_at': datetime.now(tz=timezone.utc),
-                                'content_html': content_html,
-                                'content_txt': content_txt,
-                                'is_hidden': len(content_txt.split()) < 3,
-                                'raw': json.dumps(raw, default=json_serial)
-                            })
-                            if not post.is_hidden:
-                                await hide_post_if_not_about_cybersecurity(post)
-                            if not post.is_hidden:
-                                await format_post_for_search(post, regenerate=True)
-                            yield await db.post.find_unique(where={'id': post.id})
                     await client.send_read_acknowledge(dialog.entity)
+                    async for message in client.iter_messages(dialog.entity, limit=messages_to_fetch):
+                        try:
+                            url = f"https://t.me/c/{dialog.entity.id}/{message.id}"
+                            content_html = message.text
+                            content_txt = read_markdown(content_html)
+                            created_at = message.date
+                            source = "telegram"
+                            source_id = str(message.id)
+                            raw = {'url': url, 'content': content_html, 'created_at': created_at, 'source': source,
+                                   'sender_id': message.sender_id}
+                            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                                post = await db.post.create({
+                                    'source': source,
+                                    'source_id': source_id,
+                                    'user': dialog.name,
+                                    'url': url,
+                                    'created_at': created_at,
+                                    'fetched_at': datetime.now(tz=timezone.utc),
+                                    'content_html': content_html,
+                                    'content_txt': content_txt,
+                                    'is_hidden': len(content_txt.split()) < 3,
+                                    'raw': json.dumps(raw, default=json_serial)
+                                })
+                                if not post.is_hidden:
+                                    await hide_post_if_not_about_cybersecurity(post)
+                                if not post.is_hidden:
+                                    await format_post_for_search(post, regenerate=True)
+                                yield await db.post.find_unique(where={'id': post.id})
+                        except Exception as e:
+                            errors.append(e)
     except AssertionError as e:
-        raise FetchError("Error fetching Telegram posts", [e])
+        errors.append(e)
+    if errors:
+        raise FetchError("Error fetching Telegram posts", errors)
 
 
 async def get_bluesky_posts() -> AsyncIterable[any]:
