@@ -8,3 +8,5 @@ __pycache__
 .run
 *.log
 telegram.session
+posts.jsonl.gz
+cache
