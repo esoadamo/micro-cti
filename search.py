@@ -330,7 +330,7 @@ async def search_posts(
             f"SELECT id, content_search "
             f"FROM Post WHERE "
             f"is_hidden = false "
-            f"AND MATCH(content_search) AGAINST(? IN NATURAL LANGUAGE MODE) "
+            f"AND MATCH(content_search) AGAINST(? IN BOOLEAN MODE) "
             f"AND (created_at BETWEEN '{search_earliest_hard_str} 00:00:00' AND '{search_latest_hard_str} 23:59:59') "
             f"LIMIT {results_max * 10}",
             term
