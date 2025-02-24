@@ -57,6 +57,7 @@ class PostSearchable(BasePost):
 class SearchCommands(TypedDict):
     fulltext: str
     strict_search: bool
+    distinct_score: Optional[int]
     min_score: int
     count: int
     search_latest: datetime
@@ -207,12 +208,15 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     final_query = fulltext
 
     strict_search = False
+    distinct_score = None
     results_max = 100
     search_latest: Optional[datetime] = None
     search_earliest: Optional[datetime] = None
 
     for command, param in (
             ('strict', None),
+            ('distinct', None),
+            ('distinct', r'\d+'),
             ('min_score', r'\d+'),
             ('count', r'\d+'),
             ('from', r'\d{4}-\d{2}-\d{2}'),
@@ -228,6 +232,8 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
         match command:
             case "strict":
                 strict_search = True
+            case "distinct":
+                distinct_score = int(param_value) if param_value else 90
             case "min_score":
                 min_score = int(param_value)
             case "count":
@@ -266,6 +272,7 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     return {
         'fulltext': fulltext,
         'strict_search': strict_search,
+        'distinct_score': distinct_score,
         'min_score': min_score,
         'count': count,
         'search_latest': search_latest,
@@ -291,6 +298,7 @@ async def search_posts(
     search_commands = parse_search_commands(fulltext, count=count, min_score=min_score)
     fulltext = search_commands['fulltext']
     strict_search = search_commands['strict_search']
+    distinct_score = search_commands['distinct_score']
     min_score = search_commands['min_score']
     count = search_commands['count']
     search_latest = search_commands['search_latest']
@@ -406,7 +414,24 @@ async def search_posts(
     back_data['time_goal_eval'] = time.time() - time_goal_eval_start
 
     matched_posts = filter(lambda x: matched_ids_score[x.id] >= min_score, matched_posts)
-    matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)[:count]
+
+    if distinct_score:
+        # Fuzzy compare all currently matched posts and if very similar keep only the oldest one
+        matched_posts = sorted(matched_posts, key=lambda x: x.created_at)
+        duplicated_ids: Set[int] = set()
+        for i, post in enumerate(matched_posts):
+            if post.id in duplicated_ids:
+                continue
+            for j in range(i + 1, len(matched_posts)):
+                post2 = matched_posts[j]
+                if post2.id in duplicated_ids:
+                    break
+                if fuzzywuzzy.fuzz.token_set_ratio(post.content_txt, post2.content_txt) >= distinct_score:
+                    duplicated_ids.add(matched_posts[j].id)
+        matched_posts = filter(lambda x: x.id not in duplicated_ids, matched_posts)
+
+    matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)
+    matched_posts = matched_posts[:count]
     result = [(post, round(matched_ids_score[post.id])) for post in matched_posts]
     back_data['time_end'] = time.time()
     back_data['time_total'] = back_data['time_start'] - back_data['time_end']
