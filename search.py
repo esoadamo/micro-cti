@@ -201,6 +201,12 @@ async def format_post_for_search(post: Union[PostSearchable, Post], regenerate: 
 
 
 def post_fulltext_score(post_id: int, post_content: str, search_term: str) -> Tuple[int, int]:
+    # Ignore all words starting with - as they are excluded by MySQL
+    search_term = re.sub(r"(^|\s)-\w+", "", search_term)
+    # Remove + from the start of the word as it is also because of MySQL
+    search_term = re.sub(r"(?:^|\s)\+(\w)", r" \1", search_term)
+    # Replace all double spaces
+    search_term = re.sub(r"\s+", " ", search_term).strip()
     return post_id, fuzzywuzzy.fuzz.token_set_ratio(search_term, post_content)
 
 
