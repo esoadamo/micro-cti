@@ -17,7 +17,7 @@ async def main() -> None:
         while True:
             print(f'[*] Next batch starting from id: {curr_id}\r', end='', flush=True)
             posts = await db.post.find_many(
-                where={'is_hidden': False, 'id': {'gt': curr_id}},
+                where={'OR': [{'is_hidden': False}, {'is_ingested': False}], 'id': {'gt': curr_id}},
                 take=step,
                 order={'id': 'asc'},
                 include={'tags': True}

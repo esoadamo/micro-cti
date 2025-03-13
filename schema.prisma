@@ -23,7 +23,8 @@ model Post {
   content_search String?  @db.Text
   raw            String   @db.Text
   tags_assigned  Boolean  @default(false)
-  is_hidden      Boolean  @default(false)
+  is_hidden      Boolean  @default(true)
+  is_ingested    Boolean  @default(false)
   tags           Tag[]    @relation("PostTags")
   iocs           IoC[]    @relation("PostIoCs")
 
