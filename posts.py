@@ -438,13 +438,13 @@ async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = Fals
     # Remove all @usernames from the post content
     post_content = re.sub(r'@\S+', '', post_content)
     if not force_ai and any(keyword.lower() in post_content for keyword in keywords_whitelist):
-        result = True
+        visible = True
     else:
-        result = prompt_check_cybersecurity_post(post)
-    if result != post.is_hidden:
+        visible = prompt_check_cybersecurity_post(post)
+    if visible == post.is_hidden:
         db = await get_db()
-        await db.post.update(where={'id': post.id}, data={'is_hidden': not result})
-    return result
+        await db.post.update(where={'id': post.id}, data={'is_hidden': not visible})
+    return visible
 
 
 async def get_latest_ingestion_time() -> Optional[datetime]:
