@@ -134,7 +134,7 @@ async def get_rss_posts() -> AsyncIterable[Post]:
                 content_html = rss_post.title + " " + rss_post.summary
                 content_txt = read_html(content_html)
                 db = await get_db()
-                if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                if  len(content_txt.split()) > 3 and not await db.post.find_first(where={'source': source, 'source_id': source_id}):
                     post = await db.post.create({
                         'source': source,
                         'source_id': source_id,
@@ -144,13 +144,8 @@ async def get_rss_posts() -> AsyncIterable[Post]:
                         'fetched_at': datetime.now(tz=timezone.utc),
                         'content_html': content_html,
                         'content_txt': content_txt,
-                        'is_hidden': len(content_txt.split()) < 3,
                         'raw': json.dumps(rss_post, default=json_serial)
                     })
-                    if not post.is_hidden:
-                        await hide_post_if_not_about_cybersecurity(post)
-                    if not post.is_hidden:
-                        await format_post_for_search(post, regenerate=True)
                     yield await db.post.find_unique(where={'id': post.id})
         except Exception as e:
             exceptions.append(e)
@@ -190,13 +185,9 @@ async def get_telegram_posts() -> AsyncIterable[Post]:
                                     'fetched_at': datetime.now(tz=timezone.utc),
                                     'content_html': content_html,
                                     'content_txt': content_txt,
-                                    'is_hidden': len(content_txt.split()) < 3,
+                                    'is_ingested': len(content_txt.split()) < 3,
                                     'raw': json.dumps(raw, default=json_serial)
                                 })
-                                if not post.is_hidden:
-                                    await hide_post_if_not_about_cybersecurity(post)
-                                if not post.is_hidden:
-                                    await format_post_for_search(post, regenerate=True)
                                 yield await db.post.find_unique(where={'id': post.id})
                         except Exception as e:
                             errors.append(e)
@@ -256,13 +247,9 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
                             'fetched_at': datetime.now(tz=timezone.utc),
                             'content_html': content_txt,
                             'content_txt': content_txt,
-                            'is_hidden': len(content_txt.split()) < 3,
+                            'is_ingested': len(content_txt.split()) < 3,
                             'raw': json.dumps(raw, default=dict)
                         })
-                        if not post.is_hidden:
-                            await hide_post_if_not_about_cybersecurity(post)
-                        if not post.is_hidden:
-                            await format_post_for_search(post, regenerate=True)
                         yield await db.post.find_unique(where={'id': post.id})
         except Exception as e:
             exceptions.append(e)
@@ -300,13 +287,9 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
                     'fetched_at': datetime.now(tz=timezone.utc),
                     'content_html': content_html,
                     'content_txt': content_text,
-                    'is_hidden': len(content_text.split()) < 3,
+                    'is_ingested': len(content_text.split()) < 3,
                     'raw': raw
                 })
-                if not post.is_hidden:
-                    await hide_post_if_not_about_cybersecurity(post)
-                if not post.is_hidden:
-                    await format_post_for_search(post, regenerate=True)
                 yield await db.post.find_unique(where={'id': post.id})
             airtable.delete(record_id)
     except Exception as e:
@@ -348,13 +331,9 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                                 'fetched_at': datetime.now(tz=timezone.utc),
                                 'content_html': content_html,
                                 'content_txt': content_text,
-                                'is_hidden': len(content_text.split()) < 3,
+                                'is_ingested': len(content_text.split()) < 3,
                                 'raw': json.dumps(post, default=json_serial)
                             })
-                            if not post.is_hidden:
-                                await hide_post_if_not_about_cybersecurity(post)
-                            if not post.is_hidden:
-                                await format_post_for_search(post, regenerate=True)
                             yield await db.post.find_unique(where={'id': post.id})
                 else:
                     ended = True
@@ -372,6 +351,36 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                 time.sleep(1)
     except Exception as e:
         raise FetchError("Error fetching Mastodon posts", [e])
+
+
+async def ingest_posts(ids: Optional[List[int]] = None) -> None:
+    errors = []
+
+    try:
+        if not ids and ids is not None:
+            return  # Nothing to ingest
+        db = await get_db()
+        posts_where_filter = {'is_ingested': False}
+        if ids:
+            assert ids is not None  # Pyright
+            posts_where_filter['id'] = {'in': ids}
+        uningested_posts = await db.post.find_many(where=posts_where_filter)
+        print(f'[*] found {len(uningested_posts)} posts to ingest')
+
+        for i, post in enumerate(uningested_posts):
+            try:
+                print(f'[*] ingesting {i + 1}th post out of {len(uningested_posts)} total')
+                hidden = await hide_post_if_not_about_cybersecurity(post)
+                if not hidden:
+                    await format_post_for_search(post, regenerate=True)
+                await db.post.update(where={'id': post.id}, data={'is_ingested': True})
+            except Exception as e:
+                errors.append(FetchError(f"Error ingesting {post.id}", [e]))
+    except Exception as e:
+        errors.append(FetchError("Error ingesting posts", [e]))
+
+    if errors:
+        raise FetchError("Error ingesting posts", errors)
 
 
 async def generate_tags(ids: Optional[List[int]] = None) -> None:
@@ -429,11 +438,12 @@ async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = Fals
     # Remove all @usernames from the post content
     post_content = re.sub(r'@\S+', '', post_content)
     if not force_ai and any(keyword.lower() in post_content for keyword in keywords_whitelist):
-        return True
-    db = await get_db()
-    result = prompt_check_cybersecurity_post(post)
-    if not result:
-        await db.post.update(where={'id': post.id}, data={'is_hidden': True})
+        result = True
+    else:
+        result = prompt_check_cybersecurity_post(post)
+    if result != post.is_hidden:
+        db = await get_db()
+        await db.post.update(where={'id': post.id}, data={'is_hidden': not result})
     return result
 
 

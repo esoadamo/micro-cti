@@ -7,7 +7,7 @@ from prisma.models import Post
 
 from db import get_db
 from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
-    get_telegram_posts
+    get_telegram_posts, ingest_posts
 
 
 def print_post(post: Post):
@@ -29,6 +29,13 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
         exceptions.append(e)
         if isinstance(e, FetchError):
             exceptions.extend(e.source)
+
+    try:
+        print(f'[*] {prefix} ingesting posts')
+        await ingest_posts(post_ids)
+    except Exception as e:
+        print(f'[!] {prefix} ingestion failed: {e}')
+        exceptions.append(e)
 
     try:
         print(f'[*] {prefix} generating tags')
