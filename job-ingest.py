@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+from itertools import chain
 from collections.abc import Callable
 from typing import List, AsyncIterable
 
@@ -60,19 +61,18 @@ async def main() -> int:
         fetch_posts('Bluesky', get_bluesky_posts)
     )
 
-    exceptions = []
-    for exceptions in exceptions_2d:
-        exceptions.extend(exceptions)
-
+    exceptions = list(chain(*exceptions_2d))
     print('[*] Fetching finished')
 
     await db.disconnect()
+    print('[*] Database disconnected')
     if exceptions:
         print('[!] Some errors were encountered:')
         for i, e in enumerate(exceptions):
             print(f'[!{i + 1}/{len(exceptions)}] ERROR', e)
             traceback.print_exception(type(e), e, e.__traceback__)
         return 1
+    print('[*] No errors encoutered, exiting')
     return 0
 
 
