@@ -140,14 +140,14 @@ async def app_api_search(q: str) -> PostSearchResponse:
     posts = await search_posts(search_term)
 
     posts_response: List[PostSearch] = []
-    for post, score in posts:
+    for post, metadata in posts:
         posts_response.append({
             'user': post.user,
             'source': post.source,
             'excerpt': post.content_txt[:90],
             'created': post.created_at,
             'url': post.url,
-            'score': score,
+            'score': metadata['relevancy_score'],
             'tags': [{'name': tag.name, 'color': tag.color} for tag in post.tags],
             'uid': md5((post.source + post.source_id).encode()).hexdigest()
         })

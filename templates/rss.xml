@@ -5,10 +5,10 @@
         <description>Query: {{search_term|escape}}</description>
         <link>{{url}}/</link>
         <lastBuildDate>{{ format_rfc2822(latest_ingestion_time) }}</lastBuildDate>
-        {% for (post, score) in posts %}
+        {% for (post, metadata) in posts %}
         <item>
-            <title>{{ post.content_txt[:120]|escape }}... ({{score}})</title>
-            <description>{{ post.content_txt[:120]|escape }}... ({{post.source|escape}}:{{post.user|escape}}, {{post.created_at}}, {{score}})</description>
+            <title>{{ post.content_txt[:120]|escape }}... ({{metadata.relevancy_score}})</title>
+            <description>{{ post.content_txt[:120]|escape }}... ({{post.source|escape}}:{{post.user|escape}}, {{post.created_at}}, {{metadata.relevancy_score}})</description>
             <pubDate>{{ format_rfc2822(post.created_at) }}</pubDate>
             <link>{{ post.url }}</link>
             <guid isPermaLink="true">{{ post.url }}</guid>

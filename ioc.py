@@ -58,7 +58,7 @@ async def parse_iocs(post: Post) -> AsyncIterable[IoC]:
 async def search_iocs(search_term: str) -> List[IoCLink]:
     db = await get_db()
     posts_search = await search_posts(search_term)
-    post_scores = {post.id: score for post, score in posts_search}
+    post_scores = {post.id: score['relevancy_score'] for post, score in posts_search}
     iocs = await db.ioc.find_many(where={'posts': {'some': {'id': {'in': list(post_scores.keys())}}}}, include={'posts': True})
 
     iocs_link: List[IoCLink] = []
