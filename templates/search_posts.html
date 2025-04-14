@@ -2,7 +2,11 @@
 {% block results %}
 {% for (post, metadata) in results %}
 <li>
-    <a target=_blank href="{{ post.url|escape }}">{{ post.content_txt[:120]|escape }}...</a> ({{post.source|escape}}:{{post.user|escape}}, {{post.created_at}}, {{metadata.relevancy_score}})
+    <a target=_blank href="{{ post.url|escape }}">{{ post.content_txt[:120]|escape }}...</a>
+    ({{post.source|escape}}:{{post.user|escape}},
+    {{post.created_at}},
+    {{metadata.relevancy_score}})
+    {% if commands.debug_mode %}Distinct score: {{metadata.distinct_score}}{% endif -%}
     {% if post.tags %}
     <br>
     <div class="tags">

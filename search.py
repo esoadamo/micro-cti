@@ -228,7 +228,6 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
 
     for command, param in (
             ('strict', None),
-            ('distinct', None),
             ('debug', None),
             ('distinct', r'\d+'),
             ('min_score', r'\d+'),
@@ -236,6 +235,7 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
             ('from', r'\d{4}-\d{2}-\d{2}'),
             ('to', r'\d{4}-\d{2}-\d{2}'),
             ('age', r'\d+'),
+            ('distinct', None)
     ):
         command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
         command_search = re.match(command_re, fulltext)

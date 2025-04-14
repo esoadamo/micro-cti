@@ -87,7 +87,8 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
         latest_ingestion_time=latest_ingestion_time,
         error=error,
         time_render=time_delta_ms,
-        search_count=search_back_data.get('cnt_search', 0)
+        search_count=search_back_data.get('cnt_search', 0),
+        commands=search_back_data.get('search_commands', {})
     )
 
 
