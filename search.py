@@ -59,6 +59,7 @@ class SearchCommands(TypedDict):
     strict_search: bool
     debug_mode: bool
     distinct_score: Optional[int]
+    distinct_age_days: Optional[int]
     min_score: int
     count: int
     search_latest: datetime
@@ -225,17 +226,19 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     results_max = 100
     search_latest: Optional[datetime] = None
     search_earliest: Optional[datetime] = None
+    distinct_age_days = None
 
     for command, param in (
             ('strict', None),
             ('debug', None),
+            ('distinct_age', r'\d+'),
             ('distinct', r'\d+'),
             ('min_score', r'\d+'),
             ('count', r'\d+'),
             ('from', r'\d{4}-\d{2}-\d{2}'),
             ('to', r'\d{4}-\d{2}-\d{2}'),
             ('age', r'\d+'),
-            ('distinct', None)
+            ('distinct', None),
     ):
         command_re = r"(^.*?)" + f"!{command}" + (f":({param})" if param else "") + r"(.*$)"
         command_search = re.match(command_re, fulltext)
@@ -263,6 +266,8 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
             case "age":
                 search_latest = datetime.now(tz=timezone.utc)
                 search_earliest = search_latest - timedelta(days=int(param_value))
+            case "distinct_age":
+                distinct_age_days = int(param_value)
 
     if search_latest is None:
         search_latest = datetime.now(tz=timezone.utc)
@@ -297,7 +302,8 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
         'search_earliest_hard': search_earliest_hard,
         'final_query': final_query,
         'results_max': results_max,
-        'debug_mode': debug_mode
+        'debug_mode': debug_mode,
+        'distinct_age_days': distinct_age_days
     }
 
 
@@ -317,6 +323,7 @@ async def search_posts(
     strict_search = search_commands['strict_search']
     debug_mode = search_commands['debug_mode']
     max_distinct_score = search_commands['distinct_score']
+    distinct_age_days = search_commands['distinct_age_days']
     min_score = search_commands['min_score']
     count = search_commands['count']
     search_latest = search_commands['search_latest']
@@ -327,6 +334,9 @@ async def search_posts(
     results_max = search_commands['results_max']
     back_data['search_commands'] = search_commands
     db = await get_db()
+
+    if debug_mode:
+        cache_seconds = 0
 
     if cache_seconds:
         cached_search = await cache_fetch(final_query)
@@ -447,7 +457,16 @@ async def search_posts(
                 if distinct_score >= max_distinct_score:
                     duplicated_ids.add(matched_posts[j].id)
         matched_posts = filter(lambda x: x.id not in duplicated_ids, matched_posts)
+        if distinct_age_days:
+            # Penalize posts that are older than the distinct age
+            matched_posts = list(matched_posts)
+            for post in matched_posts:
+                if post.created_at < search_latest - timedelta(days=distinct_age_days):
+                    matched_ids_score[post.id] *= (0.3 if not strict_search else 0)
 
+    # After everything is adjusted, filter by min score again
+    matched_posts = filter(lambda x: matched_ids_score[x.id] >= min_score, matched_posts)
+    # Sort by the final score and then by the created_at date
     matched_posts = sorted(matched_posts, key=lambda x: (matched_ids_score[x.id], x.created_at), reverse=True)
     matched_posts = matched_posts[:count]
     result = [(post, {'relevancy_score': round(matched_ids_score[post.id]), 'distinct_score': round(matched_posts_disctinct_score.get(post.id, 0))}) for post in matched_posts]

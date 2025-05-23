@@ -95,6 +95,95 @@ of the post is shown and you are more than encouranged to visit the original sou
 <h4>Q: Can you add/remove my posts?</h4>
 <p>A: Sure! Just write me a mail/ping me at <a href="mailto:info@ucti.app">info@ucti.app</a>.</i></p>
 
+<h3>Available commands for advanced search mode</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th>Command</th>
+            <th>Param</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td>!strict</td>
+        <td>-</td>
+        <td>Strict search. Only exact matches are returned (e.g. from quotation).</td>
+    </tr>
+    <tr>
+        <td>!from:YYYY-MM-DD</td>
+        <td>YYYY-MM-DD</td>
+        <td>Only return posts since this date inclusive.</td>
+    </tr>
+    <tr>
+        <td>!to:YYYY-MM-DD</td>
+        <td>YYYY-MM-DD</td>
+        <td>Only return posts until this date inclusive.</td>
+    </tr>
+    <tr>
+        <td>!min_score:0-100</td>
+        <td>0-100</td>
+        <td>Only return posts with a score higher or equal than this.</td>
+    </tr>
+    <tr>
+        <td>!debug</td>
+        <td>-</td>
+        <td>Enables debug mode.</td>
+    </tr>
+    <tr>
+        <td>!distinct[:0-100]</td>
+        <td>0–100 (optional)</td>
+        <td>Filters similar posts based on the specified threshold.</td>
+    </tr>
+    <tr>
+        <td>!distinct_age:number_of_days</td>
+        <td>Any positive integer</td>
+        <td>Applies an additional penalty to older posts during distinct filtering.</td>
+    </tr>
+    <tr>
+        <td>!count:1-100</td>
+        <td>1–100</td>
+        <td>Limits the maximum number of returned posts.</td>
+    </tr>
+    <tr>
+        <td>!age:number_of_days</td>
+        <td>Any positive integer</td>
+        <td>Retrieves posts from the last specified number of days.</td>
+    </tr>
+    <tr>
+        <td>a AND b</td>
+        <td>-</td>
+        <td>Use AND to combine multiple words.</td>
+    </tr>
+    <tr>
+        <td>a OR b</td>
+        <td>-</td>
+        <td>Use OR to include at least one of the words.</td>
+    </tr>
+    <tr>
+        <td>( parentheses )</td>
+        <td>-</td>
+        <td>Group search terms within parentheses for precedence.</td>
+    </tr>
+    <tr>
+        <td>+word</td>
+        <td>-</td>
+        <td>Require a word to appear in results.</td>
+    </tr>
+    <tr>
+        <td>-word</td>
+        <td>-</td>
+        <td>Exclude a word from results.</td>
+    </tr>
+    <tr>
+        <td>"quotation"</td>
+        <td>-</td>
+        <td>Search for an exact phrase.</td>
+    </tr>
+    </tbody>
+</table>
+
 {% endif %}
 
 <footer>{% if latest_ingestion_time %}Latest data ingested at {{latest_ingestion_time}}. {% endif %}Took {{time_render}} ms to render {{search_count}} searches.</footer>
