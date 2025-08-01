@@ -8,7 +8,7 @@ from prisma.models import Post
 
 from db import get_db
 from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
-    get_telegram_posts, ingest_posts
+    get_telegram_posts, get_baserow_posts, ingest_posts
 
 
 def print_post(post: Post):
@@ -58,6 +58,7 @@ async def main() -> int:
         fetch_posts('RSS', get_rss_posts),
         fetch_posts('Mastodon', get_mastodon_posts),
         fetch_posts('Airtable', get_airtable_posts),
+        fetch_posts('Baserow', get_baserow_posts),
         fetch_posts('Bluesky', get_bluesky_posts)
     )
 

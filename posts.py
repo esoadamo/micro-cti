@@ -10,6 +10,7 @@ from typing import AsyncIterable, Optional, Tuple, List, Set
 import atproto
 import feedparser
 import pyairtable
+import requests
 from bs4 import BeautifulSoup
 from markdown import markdown
 from mastodon import Mastodon
@@ -45,6 +46,11 @@ def get_bluesky_secrets() -> dict:
 def get_telegram_secrets() -> dict:
     with open("config.toml", 'rb') as f:
         return tomllib.load(f)["telegram"]
+
+
+def get_baserow_secrets() -> dict:
+    with open("config.toml", 'rb') as f:
+        return tomllib.load(f)["baserow"]
 
 
 def get_rss_feeds() -> List[dict]:
@@ -304,6 +310,58 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
             airtable.delete(record_id)
     except Exception as e:
         raise FetchError("Error fetching Airtable posts", [e])
+
+
+async def get_baserow_posts() -> AsyncIterable[Post]:
+    try:
+        secrets = get_baserow_secrets()
+        table_id = secrets["table_id"]
+        base_url = secrets["base_url"]
+        api_key = secrets["api_key"]
+        db = await get_db()
+
+        headers = {
+            "Authorization": f"Token {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.get(f"{base_url}/database/rows/table/{table_id}/?user_field_names=true", headers=headers)
+        response.raise_for_status()
+        results = response.json()['results']
+
+        for row in results:
+            row_id = row["id"]
+            created_at = datetime.fromisoformat(row["created_on"]) if "created_on" in row else datetime.now(
+                tz=timezone.utc)
+
+            try:
+                user = row.get("Account", "")
+                content_text = content_html = row.get("Content", "")
+                url = row.get("Link", "")
+                source = row.get("Source", "baserow")
+                source_id = str(row.get("Id", row_id))
+                raw = json.dumps(row)
+            except (KeyError, TypeError):
+                continue
+
+            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
+                post = await db.post.create({
+                    'source': source,
+                    'source_id': source_id,
+                    'user': user,
+                    'url': url,
+                    'created_at': created_at,
+                    'fetched_at': datetime.now(tz=timezone.utc),
+                    'content_html': content_html,
+                    'content_txt': content_text,
+                    'is_ingested': len(content_text.split()) < 3,
+                    'raw': raw
+                })
+                yield await db.post.find_unique(where={'id': post.id})
+            # Delete the row after processing (similar to Airtable behavior)
+            requests.delete(f"{base_url}/database/rows/table/{table_id}/{row_id}/", headers=headers).raise_for_status()
+    except Exception as e:
+        raise FetchError("Error fetching Baserow posts", [e])
 
 
 async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[Post]:

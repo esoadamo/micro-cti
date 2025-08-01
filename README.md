@@ -8,6 +8,7 @@ Supported sources:
 - Bluesky
 - Telegram
 - AirTable
+- Baserow
 - RSS
 
 ## Search language
