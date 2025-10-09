@@ -46,8 +46,6 @@ model IoC {
   subtype String? @db.VarChar(255)
   value   String  @db.VarChar(512)
   posts   Post[]  @relation("PostIoCs")
-
-  @@unique([type, subtype, value])
 }
 
 model SearchCache {
