@@ -45,6 +45,7 @@ model IoC {
   type    String  @db.VarChar(255)
   subtype String? @db.VarChar(255)
   value   String  @db.VarChar(512)
+  comment String? @db.Text
   posts   Post[]  @relation("PostIoCs")
 }
 

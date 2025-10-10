@@ -6,14 +6,18 @@ from typing import TypeVar
 
 from prisma.models import Post
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.models import Model
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.providers.mistral import MistralProvider
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+
 
 T = TypeVar("T")
 
 
-def get_model() -> MistralModel:
+def get_model() -> Model:
     with open("config.toml", 'rb') as f:
         config = tomllib.load(f)["ai"]
 
@@ -21,7 +25,14 @@ def get_model() -> MistralModel:
     if isinstance(api_key, list):
         api_key = choice(api_key)
 
-    return MistralModel(config["model"], provider=MistralProvider(api_key=api_key))
+    if config.get("provider") == "mistral":
+        return MistralModel(config["model"], provider=MistralProvider(api_key=api_key))
+
+    # noinspection PyTypeChecker
+    return OpenAIChatModel(
+        model_name=config["model"],
+        provider=OpenAIProvider(base_url=config["base_url"], api_key=api_key)
+    )
 
 
 async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], retries: int = 10) -> T:
@@ -30,9 +41,13 @@ async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], ret
             agent = Agent(
                 get_model(),
                 output_type=output_type,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                retries=4,
             )
             return (await agent.run(user_prompt)).output
+        except UnexpectedModelBehavior as e:
+            print(f"[!] Unexpected model behavior: {e}, retrying...")
+            await asyncio.sleep(1)
         except ModelHTTPError as e:
             if e.status_code == 429:
                 print("[!] Rate limited, retrying...")

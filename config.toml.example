@@ -15,6 +15,7 @@ api_hash="1234"
 chats=['Cyber Threat Intelligence']
 
 [ai]
+provider="mistral"
 api_key="key1"
 model="mistal-small-latest"
 

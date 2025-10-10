@@ -477,7 +477,7 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
                 tag_names = set(re.findall(r'#\w+', post_content))
 
                 if len(post_content.split()) > 15:
-                    tag_names.update(sorted(set(prompt_tags(post_content)), key=len)[:7])
+                    tag_names.update(sorted(set(await prompt_tags(post_content)), key=len)[:7])
 
                 tag_names = {x.upper() for x in tag_names}
                 print("[-]", tag_names)
@@ -508,7 +508,7 @@ async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = Fals
     if not force_ai and any(keyword.lower() in post_content for keyword in keywords_whitelist):
         visible = True
     else:
-        visible = prompt_check_cybersecurity_post(post)
+        visible = await prompt_check_cybersecurity_post(post)
     if visible == post.is_hidden:
         db = await get_db()
         await db.post.update(where={'id': post.id}, data={'is_hidden': not visible})

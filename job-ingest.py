@@ -9,6 +9,7 @@ from prisma.models import Post
 from db import get_db
 from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
     get_telegram_posts, get_baserow_posts, ingest_posts
+from ioc import parse_iocs
 
 
 def print_post(post: Post):
@@ -44,6 +45,20 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
         print(f'[*] {prefix} tags generated')
     except Exception as e:
         print(f'[!] {prefix} tag generation failed: {e}')
+        exceptions.append(e)
+
+    try:
+        print(f'[*] {prefix} parsing IoCs')
+        db = await get_db()
+        for post_id in post_ids:
+            post = await db.post.find_unique(where={'id': post_id})
+            if not post:
+                continue
+            async for ioc in parse_iocs(post):
+                print(f'  [+] {ioc}')
+        print(f'[*] {prefix} IoCs parsed')
+    except Exception as e:
+        print(f'[!] {prefix} IoC parsing failed: {e}')
         exceptions.append(e)
 
     return exceptions
