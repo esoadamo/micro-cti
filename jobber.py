@@ -4,6 +4,7 @@ from os import environ
 from datetime import datetime, timezone as tz
 from pathlib import Path
 from typing import Set
+from threading import Thread
 
 from dictature import Dictature
 from dictature.backend import DictatureBackendSQLite
@@ -103,16 +104,12 @@ async def run_job(job_name: str) -> int:
 
 async def main() -> None:
     while True:
-        jobs_to_run = []
         now = datetime.now(tz=tz.utc).timestamp()
         for job_name, interval in JOBS.items():
             last_run = TABLE_LAST_RUN.get(job_name, 0)
             if now - last_run >= interval and job_name not in JOBS_RUNNING:
                 TABLE_LAST_RUN[job_name] = now
-                jobs_to_run.append(run_job(job_name))
-        code = sum(await asyncio.gather(*jobs_to_run))
-        if code != 0:
-            print(f"[!] Some jobs failed with code {code}, check logs for details")
+                Thread(target=asyncio.run, args=(run_job(job_name),), daemon=True).start()
         await asyncio.sleep(60)
 
 
