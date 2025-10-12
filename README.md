@@ -34,8 +34,10 @@ Custom search language with commands:
 
 ## Search modes
 
-The default search mode sends the query directly to the backend and returs the whole wepage with results at once. However, there are two other search modes. Suppose your search URL was http://127.0.0.1/search/?q=my_query, then you can change the URL to following:
+The default search mode sends the query directly to the backend and returns the whole webpage with results at once. However, there are three other search modes. Suppose your search URL was http://127.0.0.1/search/?q=my_query, then you can change the URL to following:
 - http://127.0.0.1/rss/?q=my_query to get the results as RSS feed
+- http://127.0.0.1/search/dynamic/?q=my_query for dynamic search mode (loads results incrementally, suitable for large or slow queries)
+- http://127.0.0.1/api/search?q=my_query to get results in JSON format for programmatic access
 
 ## Job Files & Scheduling
 

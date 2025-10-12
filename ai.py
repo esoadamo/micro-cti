@@ -51,7 +51,10 @@ async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], ret
         except ModelHTTPError as e:
             if e.status_code == 429:
                 print("[!] Rate limited, retrying...")
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
+            if e.status_code == 500:
+                print("[!] Server error, retrying...")
+                await asyncio.sleep(5)
             else:
                 print(f"[!] HTTP Error {e.status_code}: {responses.get(e.status_code, 'Unknown error')}")
                 raise

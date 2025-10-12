@@ -4,11 +4,11 @@ from typing import AsyncIterable, List, Optional, TypedDict, Dict
 from enum import Enum
 
 from prisma.models import Post, IoC
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import get_db
 from ai import prompt
-from search import format_post_for_search, search_posts
+from search import search_posts
 
 
 class AIOicType(Enum):
@@ -29,7 +29,7 @@ class AIOicType(Enum):
 class AIIoC(BaseModel):
     value: str
     type: AIOicType
-    comment: Optional[str] = None
+    comment: Optional[str] = Field(default=None)
 
 
 class ParsedIoC(TypedDict):
@@ -120,7 +120,7 @@ async def parse_iocs(post: Post) -> AsyncIterable[IoC]:
     db = await get_db()
     for ioc in iocs.values():
         ioc = await db.ioc.create(
-            data={'value': ioc['ioc'], 'type': ioc['type_main'], 'subtype': ioc['type_secondary']}
+            data={'value': ioc['ioc'], 'type': ioc['type_main'], 'subtype': ioc['type_secondary'], 'comment': ioc['comment']}
         )
         await db.post.update(where={'id': post.id}, data={'iocs': {'connect': [{'id': ioc.id}]}})
         yield ioc
