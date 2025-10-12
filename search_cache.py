@@ -3,14 +3,11 @@ import pickle
 from hashlib import sha256
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple
-from pathlib import Path
 
 from prisma.models import Post
 
 from db import get_db
-
-
-DIR_CACHE = (Path(__file__).parent / 'cache').resolve()
+from directories import DIR_CACHE
 
 
 def _cache_query_hash(query: str) -> str:

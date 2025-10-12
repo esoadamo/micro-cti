@@ -471,7 +471,7 @@ async def search_posts(
     matched_posts = matched_posts[:count]
     result = [(post, {'relevancy_score': round(matched_ids_score[post.id]), 'distinct_score': round(matched_posts_disctinct_score.get(post.id, 0))}) for post in matched_posts]
     back_data['time_end'] = time.time()
-    back_data['time_total'] = back_data['time_start'] - back_data['time_end']
+    back_data['time_total'] = back_data['time_end'] - back_data['time_start']
     back_data['query'] = final_query
 
     if cache_seconds:

@@ -20,6 +20,7 @@ from telethon import TelegramClient
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from db import get_db, json_serial
 from search import format_post_for_search
+from directories import DIR_DATA, FILE_CONFIG
 
 
 class FetchError(Exception):
@@ -29,32 +30,32 @@ class FetchError(Exception):
 
 
 def get_mastodon_secrets() -> dict:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         return tomllib.load(f)["mastodon"]
 
 
 def get_airtable_secrets() -> dict:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         return tomllib.load(f)["airtable"]
 
 
 def get_bluesky_secrets() -> dict:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         return tomllib.load(f)["bluesky"]
 
 
 def get_telegram_secrets() -> dict:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         return tomllib.load(f)["telegram"]
 
 
 def get_baserow_secrets() -> dict:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         return tomllib.load(f)["baserow"]
 
 
 def get_rss_feeds() -> List[dict]:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         try:
             feeds = tomllib.load(f)["rss"]
             return list(feeds.values())
@@ -64,7 +65,8 @@ def get_rss_feeds() -> List[dict]:
 
 def get_telegram_instance() -> Tuple[TelegramClient, Set[str]]:
     secrets = get_telegram_secrets()
-    return TelegramClient('telegram', secrets['api_id'], secrets['api_hash']), set(secrets['chats'])
+    file_session = DIR_DATA / 'telegram'
+    return TelegramClient(f"{file_session.absolute()}", secrets['api_id'], secrets['api_hash']), set(secrets['chats'])
 
 
 def get_mastodon_instance() -> Mastodon:

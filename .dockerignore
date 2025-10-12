@@ -8,6 +8,7 @@ Dockerfile
 docker-compose.yaml
 .run
 .idea
+backup
 *.log
 .git
 .gitignore

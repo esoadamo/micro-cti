@@ -9,6 +9,8 @@ from threading import Thread
 from dictature import Dictature
 from dictature.backend import DictatureBackendSQLite
 
+from directories import DIR_DATA, DIR_LOGS
+
 
 JOBS = {
     "cache-expire":  3600,
@@ -19,10 +21,6 @@ JOBS = {
 }
 
 
-DIR_LOGS = Path(environ.get("UCTI_LOG_DIR", f"{(Path(__file__).parent / 'logs').resolve()}"))
-DIR_DATA = Path(environ.get("UCTI_DATA_DIR", f"{(Path(__file__).parent / "data").resolve()}"))
-DIR_DATA.mkdir(parents=True, exist_ok=True)
-DIR_LOGS.mkdir(parents=True, exist_ok=True)
 STORAGE = Dictature(DictatureBackendSQLite(DIR_DATA / "jobber.sqlite"))
 TABLE_LAST_RUN = STORAGE["job_last_run"]
 JOBS_RUNNING: Set[str] = set()

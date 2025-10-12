@@ -13,12 +13,14 @@ from pydantic_ai.providers.mistral import MistralProvider
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from directories import FILE_CONFIG
+
 
 T = TypeVar("T")
 
 
 def get_model() -> Model:
-    with open("config.toml", 'rb') as f:
+    with open(FILE_CONFIG, 'rb') as f:
         config = tomllib.load(f)["ai"]
 
     api_key = config["api_key"]
