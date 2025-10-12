@@ -3,6 +3,7 @@ import asyncio
 from os import environ
 from datetime import datetime, timezone as tz
 from pathlib import Path
+from typing import Set
 
 from dictature import Dictature
 from dictature.backend import DictatureBackendSQLite
@@ -23,9 +24,11 @@ DIR_DATA.mkdir(parents=True, exist_ok=True)
 DIR_LOGS.mkdir(parents=True, exist_ok=True)
 STORAGE = Dictature(DictatureBackendSQLite(DIR_DATA / "jobber.sqlite"))
 TABLE_LAST_RUN = STORAGE["job_last_run"]
+JOBS_RUNNING: Set[str] = set()
 
 
 async def run_job(job_name: str) -> int:
+    JOBS_RUNNING.add(job_name)
     file_log = DIR_LOGS / f"job-{job_name}.log"
     process = await asyncio.create_subprocess_exec(
         sys.executable, f"{Path(__file__).parent / f"job-{job_name}.py"}",
@@ -40,14 +43,50 @@ async def run_job(job_name: str) -> int:
         f.write(line)
         f.flush()
         print(line.decode('utf-8', errors='replace').rstrip())
+
+        # Buffer for incomplete lines
+        buffer = b''
+
         while True:
-            line = await process.stdout.readline()
-            if not line:
+            try:
+                # Read data in chunks instead of using readline()
+                chunk = await process.stdout.read(8192)  # 8KB chunks
+                if not chunk:
+                    # Process any remaining data in buffer
+                    if buffer:
+                        line = f"[{datetime.now(tz=tz.utc).isoformat()}] [{job_name}] ".encode() + buffer
+                        f.write(line.strip() + b'\n')
+                        f.flush()
+                        print(line.decode('utf-8', errors='replace').rstrip())
+                    break
+
+                # Add chunk to buffer
+                buffer += chunk
+
+                # Process complete lines from buffer
+                while b'\n' in buffer:
+                    line_data, buffer = buffer.split(b'\n', 1)
+                    line = f"[{datetime.now(tz=tz.utc).isoformat()}] [{job_name}] ".encode() + line_data
+                    f.write(line.strip() + b'\n')
+                    f.flush()
+                    print(line.decode('utf-8', errors='replace').rstrip())
+
+                # If buffer gets too large without a newline (>1MB), force flush it
+                if len(buffer) > 1024 * 1024:
+                    line = f"[{datetime.now(tz=tz.utc).isoformat()}] [{job_name}] ".encode() + buffer
+                    f.write(line.strip() + b'\n')
+                    f.flush()
+                    print(line.decode('utf-8', errors='replace').rstrip())
+                    buffer = b''
+
+            except Exception as e:
+                # Log any read errors and continue
+                error_line = f"[{datetime.now(tz=tz.utc).isoformat()}] [{job_name}] [ERROR] Read error: {str(e)}\n".encode()
+                f.write(error_line)
+                f.flush()
+                print(error_line.decode('utf-8', errors='replace').rstrip())
                 break
-            line = f"[{datetime.now(tz=tz.utc).isoformat()}] [{job_name}] ".encode() + line
-            f.write(line.strip() + b'\n')
-            f.flush()
-            print(line.decode('utf-8', errors='replace').rstrip())
+
         stderr = await process.stderr.read()
         if stderr:
             f.write(b"[ERROR] " + stderr)
@@ -57,24 +96,21 @@ async def run_job(job_name: str) -> int:
         f.write(line)
         f.flush()
         print(line.decode('utf-8', errors='replace').rstrip())
+    TABLE_LAST_RUN[job_name] = datetime.now(tz=tz.utc).timestamp()
+    JOBS_RUNNING.remove(job_name)
     return code
-
-
-async def run_scheduled_jobs() -> int:
-    jobs_to_run = []
-    now = datetime.now(tz=tz.utc).timestamp()
-    for job_name, interval in JOBS.items():
-        last_run = TABLE_LAST_RUN.get(job_name, 0)
-        if now - last_run >= interval:
-            TABLE_LAST_RUN[job_name] = now
-            jobs_to_run.append(run_job(job_name))
-    results = await asyncio.gather(*jobs_to_run)
-    return sum(results)
 
 
 async def main() -> None:
     while True:
-        code = await run_scheduled_jobs()
+        jobs_to_run = []
+        now = datetime.now(tz=tz.utc).timestamp()
+        for job_name, interval in JOBS.items():
+            last_run = TABLE_LAST_RUN.get(job_name, 0)
+            if now - last_run >= interval and job_name not in JOBS_RUNNING:
+                TABLE_LAST_RUN[job_name] = now
+                jobs_to_run.append(run_job(job_name))
+        code = sum(await asyncio.gather(*jobs_to_run))
         if code != 0:
             print(f"[!] Some jobs failed with code {code}, check logs for details")
         await asyncio.sleep(60)
