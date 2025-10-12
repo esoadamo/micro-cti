@@ -10,3 +10,5 @@ __pycache__
 telegram.session
 posts.jsonl.gz
 cache
+data
+logs

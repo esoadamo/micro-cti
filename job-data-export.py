@@ -1,6 +1,7 @@
 from pathlib import Path
 import gzip
 import asyncio
+from os import environ
 
 from db import get_db
 
@@ -11,7 +12,7 @@ async def main() -> None:
     print('[*] Database connected')
     step = 1000
     curr_id = 0
-    file_backup = Path('posts.jsonl.gz')
+    file_backup = Path(environ.get('UCTI_BACKUP_FILE', 'posts.jsonl.gz'))
 
     with gzip.open(file_backup, 'wt') as f:
         while True:

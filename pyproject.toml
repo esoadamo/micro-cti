@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "atproto>=0.0.62",
     "beautifulsoup4>=4.14.2",
+    "dictature>=0.14.0",
     "fastapi[standard]>=0.118.2",
     "feedparser>=6.0.12",
     "fuzzywuzzy[speedup]>=0.18.0",

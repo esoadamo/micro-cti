@@ -453,6 +453,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dictature"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/8b/ebab9c97e2e3a6d3bb42a9f6c32971609dc2478acfe259b7c577cf1c52ca/dictature-0.14.0.tar.gz", hash = "sha256:c0ce741ae8e0099b77079225f61f97146aaf03368a5effce1b6a212bf6c5f156", size = 16335, upload-time = "2025-09-02T14:10:32.401Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/35/7cbdfef9388f3f3c3dd07f72cdf0b9da15a4b7729261106b3bb36423f23f/dictature-0.14.0-py3-none-any.whl", hash = "sha256:997ef1324a726a32976314edb84d94de98b631f5086dccf13b40cb34c038735d", size = 20833, upload-time = "2025-09-02T14:10:30.774Z" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1314,6 +1323,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "atproto" },
     { name = "beautifulsoup4" },
+    { name = "dictature" },
     { name = "fastapi", extra = ["standard"] },
     { name = "feedparser" },
     { name = "fuzzywuzzy", extra = ["speedup"] },
@@ -1333,6 +1343,7 @@ dependencies = [
 requires-dist = [
     { name = "atproto", specifier = ">=0.0.62" },
     { name = "beautifulsoup4", specifier = ">=4.14.2" },
+    { name = "dictature", specifier = ">=0.14.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.118.2" },
     { name = "feedparser", specifier = ">=6.0.12" },
     { name = "fuzzywuzzy", extras = ["speedup"], specifier = ">=0.18.0" },

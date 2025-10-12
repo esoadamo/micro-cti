@@ -9,10 +9,10 @@ services:
     ports:
       - "127.0.0.1:8080:80"
     volumes:
-      - ./posts.jsonl:/app/posts.jsonl:ro
       - ./config.toml:/app/config.toml:ro
       - ./telegram.session:/app/telegram.session
-
+      - ./data:/data
+      - ./logs:/var/log/ucti
   micro-cti-db:
     image: mariadb:lts
     container_name: micro-cti-db
