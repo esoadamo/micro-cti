@@ -29,48 +29,58 @@ class FetchError(Exception):
         self.source = source
 
 
-def get_mastodon_secrets() -> dict:
-    with open(FILE_CONFIG, 'rb') as f:
-        return tomllib.load(f)["mastodon"]
+def get_mastodon_secrets() -> Optional[dict]:
+    try:
+        with open(FILE_CONFIG, 'rb') as f:
+            return tomllib.load(f)["mastodon"]
+    except KeyError:
+        return None
 
 
-def get_airtable_secrets() -> dict:
-    with open(FILE_CONFIG, 'rb') as f:
-        return tomllib.load(f)["airtable"]
+def get_airtable_secrets() -> Optional[dict]:
+    try:
+        with open(FILE_CONFIG, 'rb') as f:
+            return tomllib.load(f)["airtable"]
+    except KeyError:
+        return None
 
 
-def get_bluesky_secrets() -> dict:
-    with open(FILE_CONFIG, 'rb') as f:
-        return tomllib.load(f)["bluesky"]
+def get_bluesky_secrets() -> Optional[dict]:
+    try:
+        with open(FILE_CONFIG, 'rb') as f:
+            return tomllib.load(f)["bluesky"]
+    except KeyError:
+        return None
 
 
-def get_telegram_secrets() -> dict:
-    with open(FILE_CONFIG, 'rb') as f:
-        return tomllib.load(f)["telegram"]
+def get_telegram_secrets() -> Optional[dict]:
+    try:
+        with open(FILE_CONFIG, 'rb') as f:
+            return tomllib.load(f)["telegram"]
+    except KeyError:
+        return None
 
 
-def get_baserow_secrets() -> dict:
-    with open(FILE_CONFIG, 'rb') as f:
-        return tomllib.load(f)["baserow"]
+def get_baserow_secrets() -> Optional[dict]:
+    try:
+        with open(FILE_CONFIG, 'rb') as f:
+            return tomllib.load(f)["baserow"]
+    except KeyError:
+        return None
 
 
-def get_rss_feeds() -> List[dict]:
-    with open(FILE_CONFIG, 'rb') as f:
-        try:
-            feeds = tomllib.load(f)["rss"]
-            return list(feeds.values())
-        except KeyError:
-            return []
-
-
-def get_telegram_instance() -> Tuple[TelegramClient, Set[str]]:
+def get_telegram_instance() -> Optional[Tuple[TelegramClient, Set[str]]]:
     secrets = get_telegram_secrets()
+    if secrets is None:
+        return None
     file_session = DIR_DATA / 'telegram'
     return TelegramClient(f"{file_session.absolute()}", secrets['api_id'], secrets['api_hash']), set(secrets['chats'])
 
 
-def get_mastodon_instance() -> Mastodon:
+def get_mastodon_instance() -> Optional[Mastodon]:
     secrets = get_mastodon_secrets()
+    if secrets is None:
+        return None
 
     return Mastodon(
         client_id=secrets["client_id"],
@@ -80,21 +90,34 @@ def get_mastodon_instance() -> Mastodon:
     )
 
 
-def get_airtable_instance() -> pyairtable.Table:
+def get_airtable_instance() -> Optional[pyairtable.Table]:
     secrets = get_airtable_secrets()
+    if secrets is None:
+        return None
     api = pyairtable.Api(secrets["api_key"])
     return api.table(secrets["base_id"], secrets["table_id"])
 
 
 # noinspection PyDefaultArgument
-def get_bluesky_instance(cache={}) -> Tuple[atproto.Client, list[str]]:
+def get_bluesky_instance(cache={}) -> Optional[Tuple[atproto.Client, list[str]]]:
     if 'client' not in cache:
         secrets = get_bluesky_secrets()
+        if secrets is None:
+            return None
         client = atproto.Client()
         client.login(secrets['handle'], secrets['app_password'])
         cache['client'] = client
         cache['feeds'] = secrets['feeds']
     return cache['client'], cache['feeds']
+
+
+def get_rss_feeds() -> List[dict]:
+    with open(FILE_CONFIG, 'rb') as f:
+        try:
+            feeds = tomllib.load(f)["rss"]
+            return list(feeds.values())
+        except KeyError:
+            return []
 
 
 def read_html(content: str) -> str:
@@ -175,6 +198,8 @@ async def get_telegram_posts() -> AsyncIterable[Post]:
     errors = []
     try:
         telegram, chats = get_telegram_instance()
+        if telegram is None:
+            return
         db = await get_db()
         async with telegram as client:
             async for dialog in client.iter_dialogs():
@@ -218,6 +243,8 @@ async def get_telegram_posts() -> AsyncIterable[Post]:
 async def get_bluesky_posts() -> AsyncIterable[any]:
     try:
         client, feeds = get_bluesky_instance()
+        if client is None:
+            return
         db = await get_db()
         min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
         max_post = await db.post.find_first(where={'source': 'bluesky'}, order={'created_at': 'desc'})
@@ -278,6 +305,8 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
 async def get_airtable_posts() -> AsyncIterable[Post]:
     try:
         airtable = get_airtable_instance()
+        if airtable is None:
+            return
         db = await get_db()
 
         for record in airtable.all():
@@ -317,6 +346,8 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
 async def get_baserow_posts() -> AsyncIterable[Post]:
     try:
         secrets = get_baserow_secrets()
+        if secrets is None:
+            return
         table_id = secrets["table_id"]
         base_url = secrets["base_url"]
         api_key = secrets["api_key"]
@@ -374,6 +405,8 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
             min_id = int(max_post.source_id) if max_post is not None else None
 
         mastodon = get_mastodon_instance()
+        if mastodon is None:
+            return
 
         ended = False
         end_date = datetime(2024, 7, 1, tzinfo=timezone.utc)
