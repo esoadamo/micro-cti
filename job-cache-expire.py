@@ -2,14 +2,14 @@ import asyncio
 from datetime import datetime, timezone
 
 from db import get_db
-from prisma import SearchCacheMeta
+from prisma.models import SearchCache
 
 from directories import DIR_CACHE
 
 
 async def main() -> None:
     db = await get_db()
-    expired = await SearchCacheMeta.prisma(client=db).find_many(where={'expires_at': {'lt': datetime.now(tz=timezone.utc)}})
+    expired = await SearchCache.prisma(client=db).find_many(where={'expires_at': {'lt': datetime.now(tz=timezone.utc)}})
     for i, cache in enumerate(expired):
         print(f'[*] {i+1}/{len(expired)}', cache)
         path_cache = DIR_CACHE / cache.filepath

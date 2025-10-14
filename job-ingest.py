@@ -38,6 +38,8 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
     except Exception as e:
         print(f'[!] {prefix} ingestion failed: {e}')
         exceptions.append(e)
+        if isinstance(e, FetchError):
+            exceptions.extend(e.source)
 
     try:
         print(f'[*] {prefix} generating tags')

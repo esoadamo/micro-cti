@@ -4,6 +4,7 @@ from http.client import responses
 from random import choice
 from typing import TypeVar
 
+import mistralai
 from prisma.models import Post
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
@@ -50,7 +51,7 @@ async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], ret
         except UnexpectedModelBehavior as e:
             print(f"[!] Unexpected model behavior: {e}, retrying...")
             await asyncio.sleep(1)
-        except ModelHTTPError as e:
+        except (ModelHTTPError, mistralai.models.sdkerror.SDKError) as e:
             if e.status_code == 429:
                 print("[!] Rate limited, retrying...")
                 await asyncio.sleep(5)
