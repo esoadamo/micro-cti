@@ -1,4 +1,8 @@
 config.toml
+config
+data
+backup
+cache
 *.sqlite3*
 *.db*
 .venv

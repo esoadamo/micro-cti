@@ -10,4 +10,7 @@ for CMD in "${COMMANDS[@]}"; do
 done
 wait -n
 echo "One of the commands has exited. Exiting script."
+kill $(jobs -p)
+sleep 1
+kill -9 $(jobs -p)
 exit 1

@@ -2,7 +2,7 @@ import tomllib
 import asyncio
 from http.client import responses
 from random import choice
-from typing import TypeVar
+from typing import TypeVar, Optional
 
 import mistralai
 from prisma.models import Post
@@ -13,6 +13,8 @@ from pydantic_ai.models.mistral import MistralModel
 from pydantic_ai.providers.mistral import MistralProvider
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.models.fallback import FallbackModel
+
 
 from directories import FILE_CONFIG
 
@@ -24,17 +26,18 @@ def get_model() -> Model:
     with open(FILE_CONFIG, 'rb') as f:
         config = tomllib.load(f)["ai"]
 
-    api_key = config["api_key"]
-    if isinstance(api_key, list):
-        api_key = choice(api_key)
+    api_keys = config["api_key"]
+    if api_keys is str:
+        api_keys = [api_keys]
 
     if config.get("provider") == "mistral":
-        return MistralModel(config["model"], provider=MistralProvider(api_key=api_key))
+        models = [MistralModel(config["model"], provider=MistralProvider(api_key=x)) for x in api_keys]
+        return FallbackModel(*models)
 
     # noinspection PyTypeChecker
     return OpenAIChatModel(
         model_name=config["model"],
-        provider=OpenAIProvider(base_url=config["base_url"], api_key=api_key)
+        provider=OpenAIProvider(base_url=config["base_url"], api_key=choice(api_keys)),
     )
 
 

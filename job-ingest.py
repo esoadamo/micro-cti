@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import traceback
 from itertools import chain
 from collections.abc import Callable
@@ -63,6 +64,11 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
         print(f'[!] {prefix} IoC parsing failed: {e}')
         exceptions.append(e)
 
+    if exceptions:
+        print(f'[!] {prefix} completed with errors')
+    else:
+        print(f'[*] {prefix} completed successfully')
+
     return exceptions
 
 
@@ -88,7 +94,7 @@ async def main() -> int:
         print('[!] Some errors were encountered:')
         for i, e in enumerate(exceptions):
             print(f'[!{i + 1}/{len(exceptions)}] ERROR', e)
-            traceback.print_exception(type(e), e, e.__traceback__)
+            traceback.print_exception(type(e), e, e.__traceback__, file=sys.stdout)
         return 1
     print('[*] No errors encoutered, exiting')
     return 0
