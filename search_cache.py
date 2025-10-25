@@ -4,9 +4,9 @@ from hashlib import sha256
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 
+from prisma import Prisma
 from prisma.models import Post
 
-from db import get_db
 from directories import DIR_CACHE
 
 
@@ -14,8 +14,7 @@ def _cache_query_hash(query: str) -> str:
     return sha256(query.encode('utf8')).hexdigest()
 
 
-async def cache_fetch(query: str, max_expiration: datetime = datetime.now(tz=timezone.utc)) -> Optional[List[Tuple[Post, int]]]:
-    db = await get_db()
+async def cache_fetch(query: str, db: Prisma, max_expiration: datetime = datetime.now(tz=timezone.utc)) -> Optional[List[Tuple[Post, any]]]:
     existing_cache = await db.searchcache.find_unique(where={'query_hash': _cache_query_hash(query)})
     if existing_cache and existing_cache.expires_at > max_expiration:
         path_cache = DIR_CACHE.joinpath(existing_cache.filepath)
@@ -25,8 +24,7 @@ async def cache_fetch(query: str, max_expiration: datetime = datetime.now(tz=tim
     return None
 
 
-async def cache_save(query: str, posts: List[Tuple[Post, int]], expiration: datetime) -> None:
-    db = await get_db()
+async def cache_save(query: str, posts: List[Tuple[Post, int]], expiration: datetime, db: Prisma) -> None:
     existing = await db.searchcache.find_unique(where={'query_hash': _cache_query_hash(query)})
     if existing:
         return

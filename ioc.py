@@ -3,10 +3,10 @@ import re
 from typing import AsyncIterable, List, Optional, TypedDict, Dict
 from enum import Enum
 
+from prisma import Prisma
 from prisma.models import Post, IoC
 from pydantic import BaseModel, Field
 
-from db import get_db
 from ai import prompt
 from search import search_posts
 
@@ -47,7 +47,7 @@ class IoCLink(TypedDict):
     links: List[str]
 
 
-async def parse_iocs(post: Post) -> AsyncIterable[IoC]:
+async def parse_iocs(post: Post, db: Prisma) -> AsyncIterable[IoC]:
     content = post.content_txt
     response: List[AIIoC] = await prompt(
         system_prompt=(
@@ -117,7 +117,6 @@ async def parse_iocs(post: Post) -> AsyncIterable[IoC]:
         if is_valid:
             iocs[ioc_key] = {'ioc': ioc.value, 'type_main': type_main, 'type_secondary': type_secondary, 'comment': ioc.comment}
 
-    db = await get_db()
     for ioc in iocs.values():
         ioc = await db.ioc.create(
             data={'value': ioc['ioc'], 'type': ioc['type_main'], 'subtype': ioc['type_secondary'], 'comment': ioc['comment']}
@@ -126,9 +125,8 @@ async def parse_iocs(post: Post) -> AsyncIterable[IoC]:
         yield ioc
 
 
-async def search_iocs(search_term: str) -> List[IoCLink]:
-    db = await get_db()
-    posts_search = await search_posts(search_term)
+async def search_iocs(search_term: str, db: Prisma) -> List[IoCLink]:
+    posts_search = await search_posts(search_term, db)
     post_scores = {post.id: score['relevancy_score'] for post, score in posts_search}
     post_ids: List[int] = list(post_scores.keys())
     iocs = await db.ioc.find_many(where={'posts': {'some': {'id': {'in': post_ids}}}}, include={'posts': True})

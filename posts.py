@@ -14,11 +14,12 @@ import requests
 from bs4 import BeautifulSoup
 from markdown import markdown
 from mastodon import Mastodon
+from prisma import Prisma
 from prisma.models import Post
 from telethon import TelegramClient
 
 from ai import prompt_tags, prompt_check_cybersecurity_post
-from db import get_db, json_serial
+from db import json_serial
 from search import format_post_for_search
 from directories import DIR_DATA, FILE_CONFIG
 
@@ -122,6 +123,7 @@ def get_rss_feeds() -> List[dict]:
 
 def read_html(content: str) -> str:
     parser = BeautifulSoup(content, "html.parser")
+    # noinspection PyArgumentList
     text = parser.get_text(separator=" ", strip=True)
     for img in parser.find_all('img'):
         text += ' ' + img.get('alt', '')
@@ -138,7 +140,7 @@ def read_markdown(content: str) -> str:
     return read_html(html)
 
 
-async def get_rss_posts() -> AsyncIterable[Post]:
+async def get_rss_posts(db: Prisma) -> AsyncIterable[Post]:
     feeds = get_rss_feeds()
     exceptions = []
     for feed in feeds:
@@ -148,7 +150,7 @@ async def get_rss_posts() -> AsyncIterable[Post]:
             source = feed['name']
             date_now = datetime.now(tz=timezone.utc)
 
-            max_post = await (await get_db()).post.find_first(where={'source': source}, order={'created_at': 'desc'})
+            max_post = await db.post.find_first(where={'source': source}, order={'created_at': 'desc'})
             min_post_time = max_post.created_at if max_post else datetime.now(tz=timezone.utc) - timedelta(days=1)
 
             for rss_post in feedparser.parse(
@@ -174,7 +176,6 @@ async def get_rss_posts() -> AsyncIterable[Post]:
                 except AttributeError:
                     continue
                 content_txt = read_html(content_html)
-                db = await get_db()
                 if len(content_txt.split()) > 3 and not await db.post.find_first(where={'source': source, 'source_id': source_id}):
                     post = await db.post.create({
                         'source': source,
@@ -194,13 +195,12 @@ async def get_rss_posts() -> AsyncIterable[Post]:
         raise FetchError("Error fetching RSS feeds", exceptions)
 
 
-async def get_telegram_posts() -> AsyncIterable[Post]:
+async def get_telegram_posts(db: Prisma) -> AsyncIterable[Post]:
     errors = []
     try:
         telegram, chats = get_telegram_instance()
         if telegram is None:
             return
-        db = await get_db()
         async with telegram as client:
             async for dialog in client.iter_dialogs():
                 if dialog.name not in chats:
@@ -240,12 +240,11 @@ async def get_telegram_posts() -> AsyncIterable[Post]:
         raise FetchError("Error fetching Telegram posts", errors)
 
 
-async def get_bluesky_posts() -> AsyncIterable[any]:
+async def get_bluesky_posts(db: Prisma) -> AsyncIterable[any]:
     try:
         client, feeds = get_bluesky_instance()
         if client is None:
             return
-        db = await get_db()
         min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
         max_post = await db.post.find_first(where={'source': 'bluesky'}, order={'created_at': 'desc'})
         if max_post is not None:
@@ -302,12 +301,11 @@ async def get_bluesky_posts() -> AsyncIterable[any]:
         raise FetchError("Error fetching Bluesky feeds", exceptions)
 
 
-async def get_airtable_posts() -> AsyncIterable[Post]:
+async def get_airtable_posts(db: Prisma) -> AsyncIterable[Post]:
     try:
         airtable = get_airtable_instance()
         if airtable is None:
             return
-        db = await get_db()
 
         for record in airtable.all():
             record_id = record["id"]
@@ -343,7 +341,7 @@ async def get_airtable_posts() -> AsyncIterable[Post]:
         raise FetchError("Error fetching Airtable posts", [e])
 
 
-async def get_baserow_posts() -> AsyncIterable[Post]:
+async def get_baserow_posts(db: Prisma) -> AsyncIterable[Post]:
     try:
         secrets = get_baserow_secrets()
         if secrets is None:
@@ -351,7 +349,6 @@ async def get_baserow_posts() -> AsyncIterable[Post]:
         table_id = secrets["table_id"]
         base_url = secrets["base_url"]
         api_key = secrets["api_key"]
-        db = await get_db()
 
         headers = {
             "Authorization": f"Token {api_key}",
@@ -397,10 +394,10 @@ async def get_baserow_posts() -> AsyncIterable[Post]:
         raise FetchError("Error fetching Baserow posts", [e])
 
 
-async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
+async def get_mastodon_posts(db: Prisma, min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
     try:
         if min_id is None:
-            max_post = await (await get_db()).post.find_first(where={'source': 'mastodon'},
+            max_post = await db.post.find_first(where={'source': 'mastodon'},
                                                               order={'created_at': 'desc'})
             min_id = int(max_post.source_id) if max_post is not None else None
 
@@ -422,7 +419,6 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
                     if save:
                         content_html = post["content"]
                         content_text = read_html(content_html)
-                        db = await get_db()
                         source_id = str(post['id'])
                         if not await db.post.find_first(where={'source': 'mastodon', 'source_id': source_id}):
                             post = await db.post.create({
@@ -456,13 +452,12 @@ async def get_mastodon_posts(min_id: int = None, save: bool = True) -> AsyncIter
         raise FetchError("Error fetching Mastodon posts", [e])
 
 
-async def ingest_posts(ids: Optional[List[int]] = None) -> None:
+async def ingest_posts(db, ids: Optional[List[int]] = None) -> None:
     errors = []
 
     try:
         if not ids and ids is not None:
             return  # Nothing to ingest
-        db = await get_db()
         posts_where_filter = {'is_ingested': False}
         if ids:
             assert ids is not None  # Pyright
@@ -475,7 +470,7 @@ async def ingest_posts(ids: Optional[List[int]] = None) -> None:
                 print(f'[*] ingesting {i + 1}th post out of {len(uningested_posts)} total')
                 hidden = await hide_post_if_not_about_cybersecurity(post)
                 if not hidden:
-                    await format_post_for_search(post, regenerate=True)
+                    await format_post_for_search(post, db, regenerate=True)
                 await db.post.update(where={'id': post.id}, data={'is_ingested': True})
             except Exception as e:
                 errors.append(FetchError(f"Error ingesting {post.id}", [e]))
@@ -486,13 +481,12 @@ async def ingest_posts(ids: Optional[List[int]] = None) -> None:
         raise FetchError("Error ingesting posts", errors)
 
 
-async def generate_tags(ids: Optional[List[int]] = None) -> None:
+async def generate_tags(db, ids: Optional[List[int]] = None) -> None:
     errors = []
 
     try:
         if not ids and ids is not None:
             return  # Nothing to tag
-        db = await get_db()
         posts_where_filter = {'tags_assigned': False, 'is_hidden': False}
         if ids:
             assert ids is not None  # Pyright
@@ -524,7 +518,7 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
                 await db.post.update(where={'id': post.id},
                                      data={'tags_assigned': True,
                                            'tags': {'connect': [{"id": tag.id} for tag in tags]}})
-                await format_post_for_search(post, regenerate=True)
+                await format_post_for_search(post, db, regenerate=True)
             except Exception as e:
                 errors.append(FetchError(f"Error generating tags for {post.id}", [e]))
     except Exception as e:
@@ -534,7 +528,7 @@ async def generate_tags(ids: Optional[List[int]] = None) -> None:
         raise FetchError("Error generating tags", errors)
 
 
-async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = False) -> bool:
+async def hide_post_if_not_about_cybersecurity(post: Post, db, force_ai: bool = False) -> bool:
     keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing',
                           'bypass', 'outage', 'steal', 'malicious', 'compromise'}
     post_content = post.content_txt.lower()
@@ -545,13 +539,11 @@ async def hide_post_if_not_about_cybersecurity(post: Post, force_ai: bool = Fals
     else:
         visible = await prompt_check_cybersecurity_post(post)
     if visible == post.is_hidden:
-        db = await get_db()
         await db.post.update(where={'id': post.id}, data={'is_hidden': not visible})
     return visible
 
 
-async def get_latest_ingestion_time() -> Optional[datetime]:
-    db = await get_db()
+async def get_latest_ingestion_time(db: Prisma) -> Optional[datetime]:
     latest_fetched_post = await db.post.find_first(order={'fetched_at': 'desc'})
     return latest_fetched_post.fetched_at if latest_fetched_post else None
 

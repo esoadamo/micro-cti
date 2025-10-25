@@ -3,10 +3,12 @@ import time
 from datetime import datetime, timedelta
 from email.utils import format_datetime as format_rfc2822
 from hashlib import md5
-from typing import List, Optional
+from typing import List, Optional, Annotated
+
+from prisma import Prisma
 from typing_extensions import TypedDict
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from lark import ParseError
@@ -15,7 +17,8 @@ from starlette.templating import _TemplateResponse
 
 from ioc import search_iocs, IoCLink
 from posts import get_latest_ingestion_time
-from search import search_posts, parse_search_commands
+from search import search_posts, parse_search_commands, SearchCommands
+from db import get_db_session
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -50,7 +53,7 @@ class PostSearchResponse(TypedDict):
 
 class ApiDynamicQueriesResponse(TypedDict):
     query: str
-    commands: dict
+    commands: SearchCommands
     subqueries: List[str]
 
 
@@ -61,9 +64,12 @@ def render_template(filename, request, headers=None, **context):
     )
 
 
+DBDeps = Annotated[Prisma, Depends(get_db_session)]
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/search/", response_class=HTMLResponse)
-async def app_search(request: Request, q: str = "") -> _TemplateResponse:
+async def app_search(request: Request, db: DBDeps, q: str = "") -> _TemplateResponse:
     time_start = time.time()
     search_term = q
     posts = []
@@ -73,8 +79,8 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
 
     if search_term:
         try:
-            posts = await search_posts(search_term, back_data=search_back_data)
-            latest_ingestion_time = await get_latest_ingestion_time()
+            posts = await search_posts(search_term, db, back_data=search_back_data)
+            latest_ingestion_time = await get_latest_ingestion_time(db)
         except ParseError as e:
             error = str(e)
 
@@ -105,23 +111,23 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
 
 
 @app.get("/ioc/search/")
-async def app_ioc_search(q: str) -> IoCSearchResponse:
+async def app_ioc_search(q: str, db: DBDeps) -> IoCSearchResponse:
     search_term = q
-    iocs = await search_iocs(search_term)
+    iocs = await search_iocs(search_term, db)
     return {
         'search_term': search_term,
         'iocs': iocs,
-        'latest_ingestion_time': await get_latest_ingestion_time(),
+        'latest_ingestion_time': await get_latest_ingestion_time(db),
     }
 
 
 @app.get("/rss/", response_class=PlainTextResponse)
-async def app_rss(request: Request, q: str = "") -> _TemplateResponse:
+async def app_rss(request: Request, db: DBDeps, q: str = "") -> _TemplateResponse:
     search_term = q
     posts = []
 
     if search_term:
-        posts = await search_posts(search_term)
+        posts = await search_posts(search_term, db)
 
     return render_template(
         'rss.xml',
@@ -130,15 +136,15 @@ async def app_rss(request: Request, q: str = "") -> _TemplateResponse:
         posts=posts,
         search_term=search_term,
         url=request.url,
-        latest_ingestion_time=await get_latest_ingestion_time(),
+        latest_ingestion_time=await get_latest_ingestion_time(db),
         format_rfc2822=format_rfc2822
     )
 
 
 @app.get("/api/search")
-async def app_api_search(q: str) -> PostSearchResponse:
+async def app_api_search(q: str, db: DBDeps) -> PostSearchResponse:
     search_term = q
-    posts = await search_posts(search_term)
+    posts = await search_posts(search_term, db)
 
     posts_response: List[PostSearch] = []
     for post, metadata in posts:
@@ -190,5 +196,5 @@ async def favicon() -> FileResponse:
 
 
 @app.get("/healthcheck")
-async def healthcheck() -> dict:
-    return {'status': 'ok', 'latest_ingestion_time': await get_latest_ingestion_time()}
+async def healthcheck(db: DBDeps) -> dict:
+    return {'status': 'ok', 'latest_ingestion_time': await get_latest_ingestion_time(db)}

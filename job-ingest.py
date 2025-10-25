@@ -5,9 +5,10 @@ from itertools import chain
 from collections.abc import Callable
 from typing import List, AsyncIterable
 
+from prisma import Prisma
 from prisma.models import Post
 
-from db import get_db
+from db import DBConnector
 from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
     get_telegram_posts, get_baserow_posts, ingest_posts
 from ioc import parse_iocs
@@ -18,12 +19,12 @@ def print_post(post: Post):
     print(f'[-]{"[-]" if post.is_hidden else "[+]"} {content} - {post.user}@{post.source}')
 
 
-async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) -> List[Exception]:
+async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Post]], db: Prisma) -> List[Exception]:
     exceptions: List[Exception] = []
     post_ids: List[int] = []
     print(f'[*] {prefix} fetching')
     try:
-        async for post in function():
+        async for post in function(db):
             print_post(post)
             post_ids.append(post.id)
         print(f'[*] {prefix} fetched')
@@ -52,12 +53,11 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
 
     try:
         print(f'[*] {prefix} parsing IoCs')
-        db = await get_db()
         for post_id in post_ids:
             post = await db.post.find_unique(where={'id': post_id})
             if not post:
                 continue
-            async for ioc in parse_iocs(post):
+            async for ioc in parse_iocs(post, db):
                 print(f'  [+] {ioc}')
         print(f'[*] {prefix} IoCs parsed')
     except Exception as e:
@@ -74,29 +74,27 @@ async def fetch_posts(prefix: str, function: Callable[[], AsyncIterable[Post]]) 
 
 async def main() -> int:
     print('[*] Fetching started')
-    db = await get_db()
 
-    exceptions_2d = await asyncio.gather(
-        fetch_posts('Telegram', get_telegram_posts),
-        fetch_posts('RSS', get_rss_posts),
-        fetch_posts('Mastodon', get_mastodon_posts),
-        fetch_posts('Airtable', get_airtable_posts),
-        fetch_posts('Baserow', get_baserow_posts),
-        fetch_posts('Bluesky', get_bluesky_posts)
-    )
+    async with (await DBConnector.get()) as db:
+        exceptions_2d = await asyncio.gather(
+            fetch_posts('Telegram', get_telegram_posts, db),
+            fetch_posts('RSS', get_rss_posts, db),
+            fetch_posts('Mastodon', get_mastodon_posts, db),
+            fetch_posts('Airtable', get_airtable_posts, db),
+            fetch_posts('Baserow', get_baserow_posts, db),
+            fetch_posts('Bluesky', get_bluesky_posts, db)
+        )
 
-    exceptions = list(chain(*exceptions_2d))
-    print('[*] Fetching finished')
+        exceptions = list(chain(*exceptions_2d))
+        print('[*] Fetching finished')
 
-    await db.disconnect()
-    print('[*] Database disconnected')
-    if exceptions:
-        print('[!] Some errors were encountered:')
-        for i, e in enumerate(exceptions):
-            print(f'[!{i + 1}/{len(exceptions)}] ERROR', e)
-            traceback.print_exception(type(e), e, e.__traceback__, file=sys.stdout)
-        return 1
-    print('[*] No errors encoutered, exiting')
+        if exceptions:
+            print('[!] Some errors were encountered:')
+            for i, e in enumerate(exceptions):
+                print(f'[!{i + 1}/{len(exceptions)}] ERROR', e)
+                traceback.print_exception(type(e), e, e.__traceback__, file=sys.stdout)
+            return 1
+        print('[*] No errors encoutered, exiting')
     return 0
 
 

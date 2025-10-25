@@ -8,10 +8,10 @@ from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
 from lark import Lark, Transformer, v_args, ParseError
+from prisma import Prisma
 from prisma.bases import BasePost
 from prisma.models import Post
 
-from db import get_db
 from search_cache import cache_fetch, cache_save
 
 SEARCH_GRAMMAR = r"""
@@ -189,10 +189,9 @@ def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
             yield from parse_search_terms(child)
 
 
-async def format_post_for_search(post: Union[PostSearchable, Post], regenerate: bool = False) -> str:
+async def format_post_for_search(post: Union[PostSearchable, Post], db: Prisma, regenerate: bool = False) -> str:
     if not regenerate and post.content_search:
         return post.content_search
-    db = await get_db()
     post = await db.post.find_unique(where={'id': post.id}, include={'tags': True})
     tags = ' '.join([x.name[1:] for x in post.tags])
     content_search = ' '.join([
@@ -309,6 +308,7 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
 
 async def search_posts(
         fulltext: str,
+        db: Prisma,
         count: int = 40,
         min_score: int = 15,
         back_data: Optional[dict] = None,
@@ -333,13 +333,12 @@ async def search_posts(
     final_query = search_commands['final_query']
     results_max = search_commands['results_max']
     back_data['search_commands'] = search_commands
-    db = await get_db()
 
     if debug_mode:
         cache_seconds = 0
 
     if cache_seconds:
-        cached_search = await cache_fetch(final_query)
+        cached_search = await cache_fetch(final_query, db)
         if cached_search:
             print(f"[*] Search cache hit {final_query=}")
             return cached_search
@@ -372,7 +371,7 @@ async def search_posts(
     back_data['time_goal_db'] += time.time() - time_db_start
 
     time_goal_content_start = time.time()
-    post_contents = [(post.id, await format_post_for_search(post)) for post in posts]
+    post_contents = [(post.id, await format_post_for_search(post, db)) for post in posts]
     back_data.setdefault('time_goal_content', 0.0)
     back_data['time_goal_content'] += time.time() - time_goal_content_start
     matched_ids_score_curr = {}
@@ -476,7 +475,7 @@ async def search_posts(
 
     if cache_seconds:
         time_goal_cache_start = time.time()
-        await cache_save(final_query, result, datetime.now(tz=timezone.utc) + timedelta(seconds=cache_seconds))
+        await cache_save(final_query, result, datetime.now(tz=timezone.utc) + timedelta(seconds=cache_seconds), db)
         back_data['time_goal_cache'] = time.time() - time_goal_cache_start
 
     print(f'[*] Search time DB {int(1000 * back_data.get("time_goal_db", 0))}ms')

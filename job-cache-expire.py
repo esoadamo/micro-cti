@@ -1,21 +1,20 @@
 import asyncio
 from datetime import datetime, timezone
 
-from db import get_db
+from db import DBConnector
 from prisma.models import SearchCache
 
 from directories import DIR_CACHE
 
 
 async def main() -> None:
-    db = await get_db()
-    expired = await SearchCache.prisma(client=db).find_many(where={'expires_at': {'lt': datetime.now(tz=timezone.utc)}})
-    for i, cache in enumerate(expired):
-        print(f'[*] {i+1}/{len(expired)}', cache)
-        path_cache = DIR_CACHE / cache.filepath
-        path_cache.unlink(missing_ok=True)
-        await db.searchcache.delete(where={'id': cache.id})
-    await db.disconnect()
+    async with (await DBConnector.get()) as db:
+        expired = await SearchCache.prisma(client=db).find_many(where={'expires_at': {'lt': datetime.now(tz=timezone.utc)}})
+        for i, cache in enumerate(expired):
+            print(f'[*] {i+1}/{len(expired)}', cache)
+            path_cache = DIR_CACHE / cache.filepath
+            path_cache.unlink(missing_ok=True)
+            await db.searchcache.delete(where={'id': cache.id})
 
 if __name__ == "__main__":
     asyncio.run(main())

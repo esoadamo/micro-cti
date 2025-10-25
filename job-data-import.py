@@ -3,12 +3,13 @@ import gzip
 import asyncio
 from typing import List
 
+from prisma import Prisma
 from prisma.models import Post
 
-from db import get_db
+from db import DBConnector
 
 
-async def process_post_data(db, post_line: str, semaphore: asyncio.Semaphore) -> None:
+async def process_post_data(db: Prisma, post_line: str, semaphore: asyncio.Semaphore) -> None:
     """Process a single post with semaphore-controlled concurrency"""
     async with semaphore:
         try:
@@ -48,38 +49,37 @@ async def process_post_data(db, post_line: str, semaphore: asyncio.Semaphore) ->
 
 async def main() -> None:
     print('[*] Process started')
-    db = await get_db()
-    print('[*] Database connected')
-    file_backup = Path('/tmp/posts.jsonl.gz')
+    async with (await DBConnector.get()) as db:
+        file_backup = Path('/tmp/posts.jsonl.gz')
 
-    # Read all lines first
-    print('[*] Reading file and preparing work queue...')
-    post_lines: List[str] = []
-    with gzip.open(file_backup, 'rt') as f:
-        while True:
-            line = f.readline()
-            if not line:
-                break
-            post_lines.append(line.strip())
+        # Read all lines first
+        print('[*] Reading file and preparing work queue...')
+        post_lines: List[str] = []
+        with gzip.open(file_backup, 'rt') as f:
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                post_lines.append(line.strip())
 
-    print(f'[*] Found {len(post_lines)} posts to process')
+        print(f'[*] Found {len(post_lines)} posts to process')
 
-    # Create semaphore to limit concurrency to 16
-    semaphore = asyncio.Semaphore(16)
+        # Create semaphore to limit concurrency to 16
+        semaphore = asyncio.Semaphore(16)
 
-    # Create tasks for all posts
-    tasks = []
-    for post_line in post_lines:
-        if post_line:  # Skip empty lines
-            task = asyncio.create_task(process_post_data(db, post_line, semaphore))
-            tasks.append(task)
+        # Create tasks for all posts
+        tasks = []
+        for post_line in post_lines:
+            if post_line:  # Skip empty lines
+                task = asyncio.create_task(process_post_data(db, post_line, semaphore))
+                tasks.append(task)
 
-    # Wait for all tasks to complete
-    print(f'[*] Starting parallel processing with 16 workers...')
-    await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for all tasks to complete
+        print(f'[*] Starting parallel processing with 16 workers...')
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-    print(f'[*] Restored data from {file_backup}')
-    await db.disconnect()
+        print(f'[*] Restored data from {file_backup}')
+
 
 
 if __name__ == "__main__":
