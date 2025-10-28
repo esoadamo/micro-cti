@@ -73,6 +73,14 @@ async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Po
 
 
 async def main() -> int:
+    if '--no-fetch' in sys.argv:
+        print('[*] Ingesting uningested posts')
+        async with DBConnector() as db:
+            await ingest_posts(db)
+            print('[*] Generating tags for untagged posts')
+            await generate_tags(db)
+        return 0
+
     print('[*] Fetching started')
 
     async with (await DBConnector.get()) as db:

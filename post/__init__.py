@@ -87,9 +87,10 @@ async def ingest_posts(db, ids: Optional[List[int]] = None) -> None:
         for i, post in enumerate(uningested_posts):
             try:
                 print(f'[*] ingesting {i + 1}th post out of {len(uningested_posts)} total')
-                hidden = await hide_post_if_not_about_cybersecurity(post, db)
-                if not hidden:
+                visible = await hide_post_if_not_about_cybersecurity(post, db)
+                if visible:
                     await format_post_for_search(post, db, regenerate=True)
+                print(f'[-] post {"hidden" if not visible else "kept"} after ingestion')
                 await db.post.update(where={'id': post.id}, data={'is_ingested': True})
             except Exception as e:
                 errors.append(FetchError(f"Error ingesting {post.id}", [e]))

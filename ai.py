@@ -1,23 +1,21 @@
-import tomllib
 import asyncio
+import tomllib
 from http.client import responses
 from random import choice
-from typing import TypeVar, Optional
+from typing import TypeVar
 
 import mistralai
 from prisma.models import Post
 from pydantic_ai import Agent
-from pydantic_ai.models import Model
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
-from pydantic_ai.models.mistral import MistralModel
-from pydantic_ai.providers.mistral import MistralProvider
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
-
+from pydantic_ai.models.mistral import MistralModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.mistral import MistralProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from directories import FILE_CONFIG
-
 
 T = TypeVar("T")
 
@@ -102,7 +100,7 @@ async def prompt_check_cybersecurity_post(post: Post) -> bool:
         "research, threat intelligence, vulnerabilities, exploits and service downtimes)"
         " or some other subject. True means that the post is in english and about cybersecurity, no"
         " means that it is not.",
-        "Is this post written in english and about cybersecurity? Answer True or False: " + post.content.replace("\n", " "),
+        "Is this post written in english and about cybersecurity? Answer True or False: " + post.content_txt.replace("\n", " "),
         bool
     )
 
