@@ -162,8 +162,11 @@ async def hide_post_if_not_about_cybersecurity(post: Post, db, force_ai: bool = 
     return visible
 
 
-async def get_latest_ingestion_time(db: Prisma) -> Optional[datetime]:
-    latest_fetched_post = await db.post.find_first(order={'fetched_at': 'desc'})
+async def get_latest_ingestion_time(db: Prisma, source: Optional[str] = None) -> Optional[datetime]:
+    latest_fetched_post = await db.post.find_first(
+        where={'is_hidden': False, **({'source': source} if source else {})},
+        order={'fetched_at': 'desc'}
+    )
     return latest_fetched_post.fetched_at if latest_fetched_post else None
 
 

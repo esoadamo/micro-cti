@@ -197,4 +197,20 @@ async def favicon() -> FileResponse:
 
 @app.get("/healthcheck")
 async def healthcheck(db: DBDeps) -> dict:
-    return {'status': 'ok', 'latest_ingestion_time': await get_latest_ingestion_time(db)}
+    ingestion_times = {
+        'mastodon': await get_latest_ingestion_time(db, source='mastodon'),
+        'twitter': await get_latest_ingestion_time(db, source='twitter.com'),
+        'bluesky': await get_latest_ingestion_time(db, source='bluesky'),
+        'reddit': await get_latest_ingestion_time(db, source='/r/cybersecurity'),
+        'telegram': await get_latest_ingestion_time(db, source='telegram'),
+    }
+
+    return {
+        'status': 'ok',
+        'latest_ingestion_time': {
+            'total': await get_latest_ingestion_time(db),
+            'services': ingestion_times,
+            'earliest': min(filter(None, ingestion_times.values())) if any(ingestion_times.values()) else None,
+            'latest': max(filter(None, ingestion_times.values())) if any(ingestion_times.values()) else None,
+        }
+    }
