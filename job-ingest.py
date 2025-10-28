@@ -9,7 +9,7 @@ from prisma import Prisma
 from prisma.models import Post
 
 from db import DBConnector
-from posts import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
+from post import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
     get_telegram_posts, get_baserow_posts, ingest_posts
 from ioc import parse_iocs
 

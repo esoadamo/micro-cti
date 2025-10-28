@@ -1,7 +1,7 @@
 import asyncio
 
 from db import DBConnector
-from posts import hide_post_if_not_about_cybersecurity
+from post import hide_post_if_not_about_cybersecurity
 
 
 async def main() -> None:

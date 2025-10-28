@@ -16,7 +16,7 @@ from lark import ParseError
 from starlette.templating import _TemplateResponse
 
 from ioc import search_iocs, IoCLink
-from posts import get_latest_ingestion_time
+from post import get_latest_ingestion_time
 from search import search_posts, parse_search_commands, SearchCommands
 from db import get_db_session
 

@@ -1,7 +1,7 @@
 import asyncio
 
 from db import DBConnector
-from posts import generate_tags, ingest_posts
+from post import generate_tags, ingest_posts
 
 
 async def main() -> int:

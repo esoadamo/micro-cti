@@ -1,7 +1,7 @@
 import asyncio
 import tomli_w
 
-from posts import get_telegram_instance
+from post import get_telegram_instance
 
 
 async def main() -> None:
