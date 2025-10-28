@@ -41,31 +41,38 @@ def get_model() -> Model:
     )
 
 
-async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], retries: int = 10) -> T:
+async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], retries: int = 4) -> T:
+    exception = ValueError("Failed to get a valid response after multiple retries")
+
     for _ in range(retries):
         try:
-            agent = Agent(
-                get_model(),
-                output_type=output_type,
-                system_prompt=system_prompt,
-                retries=4,
-            )
-            return (await agent.run(user_prompt)).output
-        except UnexpectedModelBehavior as e:
-            print(f"[!] Unexpected model behavior: {e}, retrying...")
-            await asyncio.sleep(1)
-        except (ModelHTTPError, mistralai.models.sdkerror.SDKError) as e:
-            if e.status_code == 429:
-                print("[!] Rate limited, retrying...")
-                await asyncio.sleep(5)
-            if e.status_code == 500:
-                print("[!] Server error, retrying...")
-                await asyncio.sleep(5)
-            else:
-                print(f"[!] HTTP Error {e.status_code}: {responses.get(e.status_code, 'Unknown error')}")
-                raise
+            try:
+                agent = Agent(
+                    get_model(),
+                    output_type=output_type,
+                    system_prompt=system_prompt,
+                    retries=4,
+                )
+                return (await agent.run(user_prompt)).output
+            except UnexpectedModelBehavior as e:
+                print(f"[!] Unexpected model behavior: {e}, retrying...")
+                await asyncio.sleep(1)
+            except (ModelHTTPError, mistralai.models.sdkerror.SDKError) as e:
+                if e.status_code == 429:
+                    print("[!] Rate limited, retrying...")
+                    await asyncio.sleep(5)
+                if e.status_code == 500:
+                    print("[!] Server error, retrying...")
+                    await asyncio.sleep(5)
+                else:
+                    print(f"[!] HTTP Error {e.status_code}: {responses.get(e.status_code, 'Unknown error')}")
+                    raise
+        except Exception as e:
+            exception = e
+            print(f"[!] Error during prompting: {e}, retrying...")
+            await asyncio.sleep(3)
 
-    raise ValueError("Failed to get a valid response after multiple retries")
+    raise exception
 
 
 async def prompt_tags(text: str) -> list[str]:
