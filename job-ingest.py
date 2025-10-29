@@ -31,21 +31,17 @@ async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Po
     except Exception as e:
         print(f'[!] {prefix} fetch failed: {e}')
         exceptions.append(e)
-        if isinstance(e, FetchError):
-            exceptions.extend(e.source)
 
     try:
         print(f'[*] {prefix} ingesting posts')
-        await ingest_posts(post_ids)
+        await ingest_posts(db, post_ids)
     except Exception as e:
         print(f'[!] {prefix} ingestion failed: {e}')
         exceptions.append(e)
-        if isinstance(e, FetchError):
-            exceptions.extend(e.source)
 
     try:
         print(f'[*] {prefix} generating tags')
-        await generate_tags(post_ids)
+        await generate_tags(db, post_ids)
         print(f'[*] {prefix} tags generated')
     except Exception as e:
         print(f'[!] {prefix} tag generation failed: {e}')
@@ -53,12 +49,7 @@ async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Po
 
     try:
         print(f'[*] {prefix} parsing IoCs')
-        for post_id in post_ids:
-            post = await db.post.find_unique(where={'id': post_id})
-            if not post:
-                continue
-            async for ioc in parse_iocs(post, db):
-                print(f'  [+] {ioc}')
+        await parse_iocs(db, post_ids)
         print(f'[*] {prefix} IoCs parsed')
     except Exception as e:
         print(f'[!] {prefix} IoC parsing failed: {e}')
@@ -73,36 +64,56 @@ async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Po
 
 
 async def main() -> int:
+    exceptions = []
+
     if '--no-fetch' in sys.argv:
         print('[*] Ingesting uningested posts')
         async with DBConnector() as db:
-            await ingest_posts(db)
+            try:
+                await ingest_posts(db)
+                print('[*] Ingesting posts successfully')
+            except Exception as e:
+                print('[!] Error ingesting posts')
+                exceptions.append(e)
             print('[*] Generating tags for untagged posts')
-            await generate_tags(db)
-        return 0
-
-    print('[*] Fetching started')
-
-    async with (await DBConnector.get()) as db:
-        exceptions_2d = await asyncio.gather(
-            fetch_posts('Telegram', get_telegram_posts, db),
-            fetch_posts('RSS', get_rss_posts, db),
-            fetch_posts('Mastodon', get_mastodon_posts, db),
-            fetch_posts('Airtable', get_airtable_posts, db),
-            fetch_posts('Baserow', get_baserow_posts, db),
-            fetch_posts('Bluesky', get_bluesky_posts, db)
-        )
-
+            try:
+                await generate_tags(db)
+                print('[*] Generating tags successfully')
+            except Exception as e:
+                print('[!] Error generating tags')
+                exceptions.append(e)
+            print('[*] Parsing IoCs for unprocessed posts')
+            try:
+                await parse_iocs(db)
+                print('[*] Parsing IoCs for processed posts successfully')
+            except Exception as e:
+                print('[!] Error parsing IoCs')
+                exceptions.append(e)
+        print('[*] All done')
+    else:
+        print('[*] Fetching started')
+        async with (await DBConnector.get()) as db:
+            exceptions_2d = await asyncio.gather(
+                fetch_posts('Telegram', get_telegram_posts, db),
+                fetch_posts('RSS', get_rss_posts, db),
+                fetch_posts('Mastodon', get_mastodon_posts, db),
+                fetch_posts('Airtable', get_airtable_posts, db),
+                fetch_posts('Baserow', get_baserow_posts, db),
+                fetch_posts('Bluesky', get_bluesky_posts, db)
+            )
         exceptions = list(chain(*exceptions_2d))
         print('[*] Fetching finished')
 
-        if exceptions:
-            print('[!] Some errors were encountered:')
-            for i, e in enumerate(exceptions):
-                print(f'[!{i + 1}/{len(exceptions)}] ERROR', e)
-                traceback.print_exception(type(e), e, e.__traceback__, file=sys.stdout)
-            return 1
-        print('[*] No errors encoutered, exiting')
+    if exceptions:
+        print('[!] Some errors were encountered:')
+        while exceptions:
+            e = exceptions.pop(0)
+            if isinstance(e, FetchError):
+                exceptions = e.source + exceptions
+            print(f'[!] ERROR', e)
+            traceback.print_exception(type(e), e, e.__traceback__, file=sys.stdout)
+        return 1
+    print('[*] No errors encoutered, exiting')
     return 0
 
 

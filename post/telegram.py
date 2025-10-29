@@ -9,12 +9,7 @@ from telethon import TelegramClient
 from db import json_serial
 from directories import DIR_DATA, FILE_CONFIG
 from .utils import read_markdown
-
-
-class FetchError(Exception):
-    def __init__(self, message: str, source: list[Exception]):
-        super().__init__(message)
-        self.source = source
+from .exception import FetchError
 
 
 def get_telegram_secrets() -> Optional[dict]:

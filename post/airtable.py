@@ -9,11 +9,7 @@ from prisma.models import Post
 
 from directories import FILE_CONFIG
 
-
-class FetchError(Exception):
-    def __init__(self, message: str, source: list[Exception]):
-        super().__init__(message)
-        self.source = source
+from .exception import FetchError
 
 
 def get_airtable_secrets() -> Optional[dict]:

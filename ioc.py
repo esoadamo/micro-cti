@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ai import prompt
 from search import search_posts
+from post.exception import FetchError
 
 
 class AIOicType(Enum):
@@ -47,7 +48,37 @@ class IoCLink(TypedDict):
     links: List[str]
 
 
-async def parse_iocs(post: Post, db: Prisma) -> AsyncIterable[IoC]:
+async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> None:
+    errors = []
+
+    try:
+        if not ids and ids is not None:
+            return  # Nothing to tag
+        posts_where_filter = {'iocs_assigned': False, 'is_hidden': False}
+        if ids:
+            assert ids is not None  # Pyright
+            posts_where_filter['id'] = {'in': ids}
+        posts_to_process = await db.post.find_many(
+            where=posts_where_filter,
+            order={'id': 'desc'}
+        )
+        print(f'[*] found {len(posts_to_process)} posts to parse IoCs from')
+        for i, post in enumerate(posts_to_process):
+            try:
+                print(f'[*] parsing IoCs from {i + 1}th post out of {len(posts_to_process)} total')
+                async for ioc in parse_iocs_from_post(post, db):
+                    print(f'  [+] {ioc}')
+                await db.post.update(where={'id': post.id}, data={'iocs_assigned': True})
+            except Exception as e:
+                errors.append(FetchError(f"Error parsing IoCs from post {post.id}", [e]))
+    except Exception as e:
+        errors.append(FetchError("Error parsing IoCs from posts", [e]))
+
+    if errors:
+        raise FetchError("Error parsing IoCs from posts", errors)
+
+
+async def parse_iocs_from_post(post: Post, db: Prisma) -> AsyncIterable[IoC]:
     content = post.content_txt
     response: List[AIIoC] = await prompt(
         system_prompt=(

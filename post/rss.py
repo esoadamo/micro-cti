@@ -12,12 +12,7 @@ from prisma.models import Post
 from db import json_serial
 from directories import FILE_CONFIG
 from .utils import read_html
-
-
-class FetchError(Exception):
-    def __init__(self, message: str, source: list[Exception]):
-        super().__init__(message)
-        self.source = source
+from .exception import FetchError
 
 
 def get_rss_feeds() -> List[dict]:

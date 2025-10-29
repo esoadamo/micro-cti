@@ -12,7 +12,7 @@ This module is organized into submodules by platform:
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, List
 
 from prisma import Prisma
@@ -20,41 +20,35 @@ from prisma.models import Post
 
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from search import format_post_for_search
-
-# Import platform-specific modules
-from .mastodon import (
-    get_mastodon_secrets,
-    get_mastodon_instance,
-    get_mastodon_posts,
-    FetchError as MastodonFetchError
-)
-from .baserow import (
-    get_baserow_secrets,
-    get_baserow_posts,
-    FetchError as BaserowFetchError
-)
 from .airtable import (
     get_airtable_secrets,
     get_airtable_instance,
     get_airtable_posts,
-    FetchError as AirtableFetchError
+)
+from .baserow import (
+    get_baserow_secrets,
+    get_baserow_posts,
 )
 from .bluesky import (
     get_bluesky_secrets,
     get_bluesky_instance,
     get_bluesky_posts,
-    FetchError as BlueskyFetchError
+)
+from .exception import FetchError
+# Import platform-specific modules
+from .mastodon import (
+    get_mastodon_secrets,
+    get_mastodon_instance,
+    get_mastodon_posts,
 )
 from .rss import (
     get_rss_feeds,
     get_rss_posts,
-    FetchError as RSSFetchError
 )
 from .telegram import (
     get_telegram_secrets,
     get_telegram_instance,
     get_telegram_posts,
-    FetchError as TelegramFetchError
 )
 from .utils import (
     read_html,
@@ -64,14 +58,7 @@ from .utils import (
 )
 
 
-# Main FetchError class that aggregates all platform-specific errors
-class FetchError(Exception):
-    def __init__(self, message: str, source: list[Exception]):
-        super().__init__(message)
-        self.source = source
-
-
-async def ingest_posts(db, ids: Optional[List[int]] = None) -> None:
+async def ingest_posts(db: Prisma, ids: Optional[List[int]] = None) -> None:
     errors = []
 
     try:
@@ -101,7 +88,7 @@ async def ingest_posts(db, ids: Optional[List[int]] = None) -> None:
         raise FetchError("Error ingesting posts", errors)
 
 
-async def generate_tags(db, ids: Optional[List[int]] = None) -> None:
+async def generate_tags(db: Prisma, ids: Optional[List[int]] = None) -> None:
     errors = []
 
     try:
