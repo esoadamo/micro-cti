@@ -43,6 +43,10 @@ async def get_telegram_posts(db: Prisma) -> AsyncIterable[any]:
                     await client.send_read_acknowledge(dialog.entity)
                     async for message in client.iter_messages(dialog.entity, limit=messages_to_fetch):
                         try:
+                            if not message.text:
+                                # Skip media only messages
+                                continue
+
                             url = f"https://t.me/c/{dialog.entity.id}/{message.id}"
                             content_html = message.text
                             content_txt = read_markdown(content_html)
