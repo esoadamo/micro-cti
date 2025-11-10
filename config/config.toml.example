@@ -32,3 +32,8 @@ table_id="1234"
 [rss.reddit_cybersecurity]
 name="reddit/r/cybersecurity"
 url="https://www.reddit.com/r/cybersecurity.rss"
+
+[misp-org]
+name="ExampleOrg"
+uuid="123e4567-e89b-12d3-a456-426614174000"
+email="example@example.com"

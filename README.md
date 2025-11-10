@@ -39,6 +39,16 @@ The default search mode sends the query directly to the backend and returns the 
 - http://127.0.0.1/search/dynamic/?q=my_query for dynamic search mode (loads results incrementally, suitable for large or slow queries)
 - http://127.0.0.1/api/search?q=my_query to get results in JSON format for programmatic access
 
+## IoC Export
+
+The system automatically parses indicators of compromise (IoCs) from posts, including IP addresses, domains, URLs, file hashes, and more. You can export IoCs in multiple formats by replacing `/search/` with `/ioc/` in the URL:
+
+- **JSON format**: Replace `/search/` with `/ioc/json/`. For example: http://127.0.0.1/ioc/json/?q=my_query
+- **CSV format**: Replace `/search/` with `/ioc/csv/`. For example: http://127.0.0.1/ioc/csv/?q=my_query
+- **MISP feed**: Replace `/search/` with `/ioc/misp/`. For example: http://127.0.0.1/ioc/misp/?q=my_query
+
+IoCs are automatically extracted and categorized with relevance scores. The `job-parse-ioc.py` script can be run to parse IoCs from all visible posts.
+
 ## Job Files & Scheduling
 
 This project includes several job scripts for data ingestion, maintenance, and export. Below is a summary of each job file and its recommended schedule:

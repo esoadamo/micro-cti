@@ -100,6 +100,15 @@ For example, <a href="/rss/?q=ransomware">/rss/?q=ransomware</a> will give you a
 <h4>Q: Can I get results in JSON for programmatic use?</h4>
 <p>A: Yes! Use the <i>/api/search</i> endpoint to get search results in JSON format. For example, <a href="/api/search?q=ransomware">/api/search?q=ransomware</a>.</p>
 
+<h4>Q: Can I ingest IoCs?</h4>
+<p>A: Yes! The system automatically parses indicators of compromise (IoCs) from posts. You can export them in multiple formats by replacing <i>/search/</i> with <i>/ioc/</i> in the URL:
+<ul>
+<li><b>JSON format:</b> Replace <i>/search/</i> with <i>/ioc/json/</i>. For example, <a href="/ioc/json/?q=ransomware">/ioc/json/?q=ransomware</a>.</li>
+<li><b>CSV format:</b> Replace <i>/search/</i> with <i>/ioc/csv/</i>. For example, <a href="/ioc/csv/?q=ransomware">/ioc/csv/?q=ransomware</a>.</li>
+<li><b>MISP feed:</b> Replace <i>/search/</i> with <i>/ioc/misp/</i>. For example, <a href="/ioc/misp/?q=ransomware">/ioc/misp/?q=ransomware</a>.</li>
+</ul>
+</p>
+
 <h4>Q: How much does this cost?</h4>
 <p>A: You? Enjoy the free threat intelligence. Me? Right now, a few bucks per month.</i></p>
 

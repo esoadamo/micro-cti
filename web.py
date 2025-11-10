@@ -1,24 +1,29 @@
+import json
 import re
 import time
+from csv import DictWriter
 from datetime import datetime, timedelta
 from email.utils import format_datetime as format_rfc2822
 from hashlib import md5
-from typing import List, Optional, Annotated
-
-from prisma import Prisma
-from typing_extensions import TypedDict
+from io import StringIO
+from typing import List, Optional, Annotated, Dict
+from base64 import b64encode, b64decode
 
 from fastapi import FastAPI, Request, Depends
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, JSONResponse, RedirectResponse
+from fastapi.exceptions import HTTPException
 from fastapi.templating import Jinja2Templates
 from lark import ParseError
+from prisma import Prisma
 # noinspection PyPackageRequirements,PyProtectedMember
 from starlette.templating import _TemplateResponse
+from typing_extensions import TypedDict
 
+from db import get_db_session
 from ioc import search_iocs, IoCLink
 from post import get_latest_ingestion_time
 from search import search_posts, parse_search_commands, SearchCommands
-from db import get_db_session
+from misp_feed import generate_misp_feed
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -110,8 +115,8 @@ async def app_search(request: Request, q: str = "") -> _TemplateResponse:
     )
 
 
-@app.get("/ioc/search/")
-async def app_ioc_search(q: str, db: DBDeps) -> IoCSearchResponse:
+@app.get("/ioc/json/")
+async def app_ioc_json(q: str, db: DBDeps) -> IoCSearchResponse:
     search_term = q
     iocs = await search_iocs(search_term, db)
     return {
@@ -119,6 +124,52 @@ async def app_ioc_search(q: str, db: DBDeps) -> IoCSearchResponse:
         'iocs': iocs,
         'latest_ingestion_time': await get_latest_ingestion_time(db),
     }
+
+
+@app.get("/ioc/csv/", response_class=PlainTextResponse)
+async def app_ioc_csv(q: str, db: DBDeps) -> str:
+    search_term = q
+    iocs = await search_iocs(search_term, db)
+    output = StringIO()
+
+    writer = DictWriter(output, fieldnames=['type', 'value', 'subtype', 'comment', 'link', 'relevance'])
+    writer.writeheader()
+    for ioc in iocs:
+        writer.writerow({
+            'type': ioc['type'],
+            'subtype': ioc.get('subtype', ''),
+            'value': ioc['value'],
+            'comment': ioc.get('comment', ''),
+            'link': ';'.join(map(lambda x: x.replace('|', '&#124;'), ioc['links'])),
+            'relevance': ioc['relevance']
+        })
+
+    return output.getvalue()
+
+
+@app.get("/ioc/misp/", response_class=RedirectResponse)
+async def app_ioc_misp(q: str, request: Request) -> RedirectResponse:
+    return RedirectResponse(
+        request.url_for(
+            'app_ioc_misp_search_file',
+            search_base64=b64encode(json.dumps({'q': q}).encode()).decode(),
+            filename='manifest.json'
+        )
+    )
+
+
+@app.get('/ioc/misp/{search_base64}/{filename}', response_class=JSONResponse)
+async def app_ioc_misp_search_file(search_base64: str, filename: str, db: DBDeps) -> dict:
+    query = json.loads(b64decode(search_base64).decode())
+    search_term = query['q']
+    iocs = await search_iocs(search_term, db)
+    feed = generate_misp_feed(iocs)
+    if filename == 'manifest.json':
+        return feed.manifest
+    for event in feed.events:
+        if event.get('Event', {}).get('uuid', '') + '.json' == filename:
+            return event
+    raise HTTPException(status_code=404, detail="Item not found")
 
 
 @app.get("/rss/", response_class=PlainTextResponse)

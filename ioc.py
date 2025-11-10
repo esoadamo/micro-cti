@@ -45,6 +45,7 @@ class IoCLink(TypedDict):
     type: str
     subtype: Optional[str]
     relevance: int
+    comment: Optional[str]
     links: List[str]
 
 
@@ -170,6 +171,7 @@ async def search_iocs(search_term: str, db: Prisma) -> List[IoCLink]:
             'type': ioc.type,
             'subtype': ioc.subtype,
             'relevance': relevance,
+            'comment': ioc.comment,
             'links': [post.url for post in ioc.posts]
         })
 
