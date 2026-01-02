@@ -3,7 +3,7 @@ version: '3.8'
 services:
   micro-cti:
     container_name: micro-cti
-    image: esoadamo/micro-cti
+    image: docker.io/esoadamo/micro-cti
     build:
       context: .
     ports:

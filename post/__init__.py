@@ -112,7 +112,8 @@ async def generate_tags(db: Prisma, ids: Optional[List[int]] = None) -> None:
 
                 tag_names = set(re.findall(r'#\w+', post_content))
 
-                if len(post_content.split()) > 15:
+                # Only call AI if post has enough content AND no existing hashtags
+                if len(post_content.split()) > 15 and len(tag_names) < 3:
                     tag_names.update(sorted(set(await prompt_tags(post_content)), key=len)[:7])
 
                 tag_names = {x.upper() for x in tag_names}
