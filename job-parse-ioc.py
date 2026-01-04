@@ -26,7 +26,7 @@ async def main() -> None:
             for i, post in enumerate(posts):
                 print(f'[*] {i + 1}/{len(posts)}', post.content_txt)
                 try:
-                    async for ioc in parse_iocs(post):
+                    async for ioc in parse_iocs(db, [post.id]):
                         print(f'  [+] {ioc}')
                 except Exception as e:
                     print(f'  [!] Error parsing IoCs: {e}')

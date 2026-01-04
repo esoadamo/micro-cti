@@ -49,7 +49,7 @@ class IoCLink(TypedDict):
     links: List[str]
 
 
-async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> None:
+async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> AsyncIterable[IoC]:
     errors = []
 
     try:
@@ -69,6 +69,7 @@ async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> None:
                 print(f'[*] parsing IoCs from {i + 1}th post out of {len(posts_to_process)} total')
                 async for ioc in parse_iocs_from_post(post, db):
                     print(f'  [+] {ioc}')
+                    yield ioc
                 await db.post.update(where={'id': post.id}, data={'iocs_assigned': True})
             except Exception as e:
                 errors.append(FetchError(f"Error parsing IoCs from post {post.id}", [e]))
@@ -80,25 +81,15 @@ async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> None:
 
 
 async def parse_iocs_from_post(post: Post, db: Prisma) -> AsyncIterable[IoC]:
-    content = post.content_txt
+    # Truncate content to 2000 chars (enough for most IoCs)
+    content = post.content_txt[:2000]
     response: List[AIIoC] = await prompt(
         system_prompt=(
-            "You are a cybersecurity AI assistant capable of extracting Indicators of Compromise (IoCs) "
-            "from text. You always respond with a JSON array of objects, each containing 'value' and 'type'. "
-            "If you encouter defanged IoCs, you should restore them to their original form -- for example, "
-            "'hxxp://example[.]com' should be returned as 'http://example.com'. "
-            "Sometimes the link formating is broken with spaces or newlines, you should restore them to their original form. "
-            "The 'type' can be one of the following: ip, domain, hash, url, email, external-report-link, browser-extension-id, vulnerability, username. "
-            "The 'value' is the actual IoC. "
-            "The 'comment' field can contain any additional context or information about the IoC. "
-            "For browser extension IDs, use browser-extension-id as type. "
-            "For links to external articles, use external-report-link as type. "
-            "Only respond with IoCs that are clearly indicated as IoCs in the text or external links to reports and articles. "
-            "If no IoCs are found, respond with an empty array."
+            "Extract IoCs from text. Return JSON array with 'value', 'type', 'comment'. "
+            "Types: ip, domain, hash, url, email, external-report-link, browser-extension-id, vulnerability, username. "
+            "Restore defanged IoCs (hxxp→http, [.]→.). Empty array if none found."
         ),
-        user_prompt=(
-            "Extract all IoCs from the following text. " + content
-        ),
+        user_prompt=content,
         output_type=List[AIIoC]
     )
     response.append(AIIoC(value=post.url, type=AIOicType.external_report_link, comment="Link to the post"))
