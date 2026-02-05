@@ -49,7 +49,8 @@ async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Po
 
     try:
         print(f'[*] {prefix} parsing IoCs')
-        await parse_iocs(db, post_ids)
+        async for _ in parse_iocs(db, post_ids):
+            pass  # IoCs are processed and stored within parse_iocs
         print(f'[*] {prefix} IoCs parsed')
     except Exception as e:
         print(f'[!] {prefix} IoC parsing failed: {e}')
