@@ -1,5 +1,5 @@
+import asyncio
 import json
-import time
 import tomllib
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
@@ -28,9 +28,8 @@ async def get_rss_posts(db: Prisma) -> AsyncIterable[Post]:
     feeds = get_rss_feeds()
     exceptions = []
     for feed in feeds:
-        # noinspection PyBroadException
         try:
-            time.sleep(10)
+            await asyncio.sleep(10)
             source = feed['name']
             date_now = datetime.now(tz=timezone.utc)
 

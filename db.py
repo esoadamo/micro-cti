@@ -1,8 +1,10 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import AsyncIterable, Optional
 
 from prisma import Prisma
 from asyncio import Lock
+
+DB_TIMEOUT = timedelta(seconds=30)
 
 
 class DBConnector:
@@ -19,7 +21,10 @@ class DBConnector:
             self.__clients_count += 1
             if self.__conn is not None:
                 return self.__conn
-            conn = Prisma()
+            conn = Prisma(
+                connect_timeout=DB_TIMEOUT,
+                http={"timeout": DB_TIMEOUT.total_seconds()},
+            )
             await conn.connect()
             print('[*] Database connection estabilished successfuly')
             self.__conn = conn
