@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 from typing import AsyncIterable, Optional
 
 from mastodon import Mastodon
-from prisma import Prisma
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, desc
+from models import Post
 
 from db import json_serial
 from directories import FILE_CONFIG
@@ -35,11 +36,12 @@ def get_mastodon_instance() -> Optional[Mastodon]:
     )
 
 
-async def get_mastodon_posts(db: Prisma, min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
+async def get_mastodon_posts(db: AsyncSession, min_id: int = None, save: bool = True) -> AsyncIterable[Post]:
     try:
         if min_id is None:
-            max_post = await db.post.find_first(where={'source': 'mastodon'},
-                                                              order={'created_at': 'desc'})
+            stmt = select(Post).where(Post.source == 'mastodon').order_by(desc(Post.created_at)).limit(1)
+            res = await db.exec(stmt)
+            max_post = res.first()
             min_id = int(max_post.source_id) if max_post is not None else None
 
         mastodon = get_mastodon_instance()
@@ -55,26 +57,31 @@ async def get_mastodon_posts(db: Prisma, min_id: int = None, save: bool = True) 
             if not timeline:
                 print('[*] Nothing more to check, exiting')
                 break
-            for post in timeline:
-                if post['created_at'] > end_date:
+            for post_item in timeline:
+                if post_item['created_at'] > end_date:
                     if save:
-                        content_html = post["content"]
+                        content_html = post_item["content"]
                         content_text = read_html(content_html)
-                        source_id = str(post['id'])
-                        if not await db.post.find_first(where={'source': 'mastodon', 'source_id': source_id}):
-                            post = await db.post.create({
-                                'source': 'mastodon',
-                                'source_id': source_id,
-                                'user': post['account']['acct'],
-                                'url': post['url'] or post['uri'],
-                                'created_at': post['created_at'],
-                                'fetched_at': datetime.now(tz=timezone.utc),
-                                'content_html': content_html,
-                                'content_txt': content_text,
-                                'is_ingested': len(content_text.split()) < 3,
-                                'raw': json.dumps(post, default=json_serial)
-                            })
-                            yield await db.post.find_unique(where={'id': post.id})
+                        source_id = str(post_item['id'])
+                        stmt = select(Post).where(Post.source == 'mastodon', Post.source_id == source_id).limit(1)
+                        res = await db.exec(stmt)
+                        if not res.first():
+                            post = Post(
+                                source='mastodon',
+                                source_id=source_id,
+                                user=post_item['account']['acct'],
+                                url=post_item['url'] or post_item['uri'],
+                                created_at=post_item['created_at'],
+                                fetched_at=datetime.now(tz=timezone.utc),
+                                content_html=content_html,
+                                content_txt=content_text,
+                                is_ingested=len(content_text.split()) < 3,
+                                raw=json.dumps(post_item, default=json_serial)
+                            )
+                            db.add(post)
+                            await db.commit()
+                            await db.refresh(post)
+                            yield post
                 else:
                     ended = True
                     print('[*] Selected end time reached, exiting')

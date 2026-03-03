@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 from typing import AsyncIterable, Optional
 
 import pyairtable
-from prisma import Prisma
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
+from models import Post
 
 from directories import FILE_CONFIG
 
@@ -28,7 +29,7 @@ def get_airtable_instance() -> Optional[pyairtable.Table]:
     return api.table(secrets["base_id"], secrets["table_id"])
 
 
-async def get_airtable_posts(db: Prisma) -> AsyncIterable[Post]:
+async def get_airtable_posts(db: AsyncSession) -> AsyncIterable[Post]:
     try:
         airtable = get_airtable_instance()
         if airtable is None:
@@ -49,20 +50,25 @@ async def get_airtable_posts(db: Prisma) -> AsyncIterable[Post]:
             except KeyError:
                 continue
 
-            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                post = await db.post.create({
-                    'source': source,
-                    'source_id': source_id,
-                    'user': user,
-                    'url': url,
-                    'created_at': created_at,
-                    'fetched_at': datetime.now(tz=timezone.utc),
-                    'content_html': content_html,
-                    'content_txt': content_text,
-                    'is_ingested': len(content_text.split()) < 3,
-                    'raw': raw
-                })
-                yield await db.post.find_unique(where={'id': post.id})
+            stmt = select(Post).where(Post.source == source, Post.source_id == source_id).limit(1)
+            res = await db.exec(stmt)
+            if not res.first():
+                post = Post(
+                    source=source,
+                    source_id=source_id,
+                    user=user,
+                    url=url,
+                    created_at=created_at,
+                    fetched_at=datetime.now(tz=timezone.utc),
+                    content_html=content_html,
+                    content_txt=content_text,
+                    is_ingested=len(content_text.split()) < 3,
+                    raw=raw
+                )
+                db.add(post)
+                await db.commit()
+                await db.refresh(post)
+                yield post
             airtable.delete(record_id)
     except Exception as e:
         raise FetchError("Error fetching Airtable posts", [e])

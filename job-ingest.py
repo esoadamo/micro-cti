@@ -5,8 +5,8 @@ from itertools import chain
 from collections.abc import Callable
 from typing import List, AsyncIterable
 
-from prisma import Prisma
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from models import Post
 
 from db import DBConnector
 from post import generate_tags, get_mastodon_posts, get_airtable_posts, get_bluesky_posts, get_rss_posts, FetchError, \
@@ -19,7 +19,7 @@ def print_post(post: Post):
     print(f'[-]{"[-]" if post.is_hidden else "[+]"} {content} - {post.user}@{post.source}')
 
 
-async def fetch_posts(prefix: str, function: Callable[[Prisma], AsyncIterable[Post]], db: Prisma) -> List[Exception]:
+async def fetch_posts(prefix: str, function: Callable[[AsyncSession], AsyncIterable[Post]], db: AsyncSession) -> List[Exception]:
     exceptions: List[Exception] = []
     post_ids: List[int] = []
     print(f'[*] {prefix} fetching')

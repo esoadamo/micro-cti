@@ -15,8 +15,10 @@ import re
 from datetime import datetime
 from typing import Optional, List
 
-from prisma import Prisma
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, desc
+from sqlalchemy.orm import selectinload
+from models import Post, Tag
 
 from ai import prompt_tags, prompt_check_cybersecurity_post
 from search import format_post_for_search
@@ -58,17 +60,19 @@ from .utils import (
 )
 
 
-async def ingest_posts(db: Prisma, ids: Optional[List[int]] = None) -> None:
+async def ingest_posts(db: AsyncSession, ids: Optional[List[int]] = None) -> None:
     errors = []
 
     try:
         if not ids and ids is not None:
             return  # Nothing to ingest
-        posts_where_filter = {'is_ingested': False}
+            
+        stmt = select(Post).where(Post.is_ingested == False)
         if ids:
-            assert ids is not None  # Pyright
-            posts_where_filter['id'] = {'in': ids}
-        uningested_posts = await db.post.find_many(where=posts_where_filter)
+            stmt = stmt.where(Post.id.in_(ids))
+            
+        res = await db.exec(stmt)
+        uningested_posts = res.all()
         print(f'[*] found {len(uningested_posts)} posts to ingest')
 
         for i, post in enumerate(uningested_posts):
@@ -78,7 +82,9 @@ async def ingest_posts(db: Prisma, ids: Optional[List[int]] = None) -> None:
                 if visible:
                     await format_post_for_search(post, db, regenerate=True)
                 print(f'[-] post {"hidden" if not visible else "kept"} after ingestion')
-                await db.post.update(where={'id': post.id}, data={'is_ingested': True})
+                post.is_ingested = True
+                db.add(post)
+                await db.commit()
             except Exception as e:
                 errors.append(FetchError(f"Error ingesting {post.id}", [e]))
     except Exception as e:
@@ -88,27 +94,26 @@ async def ingest_posts(db: Prisma, ids: Optional[List[int]] = None) -> None:
         raise FetchError("Error ingesting posts", errors)
 
 
-async def generate_tags(db: Prisma, ids: Optional[List[int]] = None) -> None:
+async def generate_tags(db: AsyncSession, ids: Optional[List[int]] = None) -> None:
     errors = []
 
     try:
         if not ids and ids is not None:
             return  # Nothing to tag
-        posts_where_filter = {'tags_assigned': False, 'is_hidden': False}
+            
+        stmt = select(Post).where(Post.tags_assigned == False, Post.is_hidden == False).order_by(desc(Post.id)).options(selectinload(Post.tags))
         if ids:
-            assert ids is not None  # Pyright
-            posts_where_filter['id'] = {'in': ids}
-        untagged_posts = await db.post.find_many(
-            where=posts_where_filter,
-            order={'id': 'desc'}
-        )
+            stmt = stmt.where(Post.id.in_(ids))
+            
+        res = await db.exec(stmt)
+        untagged_posts = res.all()
         print(f'[*] found {len(untagged_posts)} posts to tag')
 
         for i, post in enumerate(untagged_posts):
             try:
                 print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
                 post_content = post.content_txt[:1000]
-                print("[?]", post_content.replace('\n', ' '))
+                print("[?]", post_content.replace('\\n', ' '))
 
                 tag_names = set(re.findall(r'#\w+', post_content))
 
@@ -119,13 +124,25 @@ async def generate_tags(db: Prisma, ids: Optional[List[int]] = None) -> None:
                 tag_names = {x.upper() for x in tag_names}
                 print("[-]", tag_names)
 
-                tags = [await db.tag.upsert(where={"name": tag_name},
-                                            data={'create': {"name": tag_name, "color": generate_random_color()},
-                                                  'update': {}})
-                        for tag_name in tag_names]
-                await db.post.update(where={'id': post.id},
-                                     data={'tags_assigned': True,
-                                           'tags': {'connect': [{"id": tag.id} for tag in tags]}})
+                extracted_tags = []
+                for tag_name in tag_names:
+                    tag_stmt = select(Tag).where(Tag.name == tag_name).limit(1)
+                    tag_res = await db.exec(tag_stmt)
+                    tag = tag_res.first()
+                    if not tag:
+                        tag = Tag(name=tag_name, color=generate_random_color())
+                        db.add(tag)
+                        await db.commit() # Commit to get the ID
+                        await db.refresh(tag)
+                    extracted_tags.append(tag)
+                    
+                post.tags_assigned = True
+                for t in extracted_tags:
+                    if t not in post.tags:
+                        post.tags.append(t)
+                
+                db.add(post)
+                await db.commit()
                 await format_post_for_search(post, db, regenerate=True)
             except Exception as e:
                 errors.append(FetchError(f"Error generating tags for {post.id}", [e]))
@@ -147,15 +164,19 @@ async def hide_post_if_not_about_cybersecurity(post: Post, db, force_ai: bool = 
     else:
         visible = await prompt_check_cybersecurity_post(post)
     if visible == post.is_hidden:
-        await db.post.update(where={'id': post.id}, data={'is_hidden': not visible})
+        post.is_hidden = not visible
+        db.add(post)
+        await db.commit()
     return visible
 
 
-async def get_latest_ingestion_time(db: Prisma, source: Optional[str] = None) -> Optional[datetime]:
-    latest_fetched_post = await db.post.find_first(
-        where={'is_hidden': False, **({'source': source} if source else {})},
-        order={'fetched_at': 'desc'}
-    )
+async def get_latest_ingestion_time(db: AsyncSession, source: Optional[str] = None) -> Optional[datetime]:
+    stmt = select(Post).where(Post.is_hidden == False)
+    if source:
+        stmt = stmt.where(Post.source == source)
+    stmt = stmt.order_by(desc(Post.fetched_at)).limit(1)
+    res = await db.exec(stmt)
+    latest_fetched_post = res.first()
     return latest_fetched_post.fetched_at if latest_fetched_post else None
 
 

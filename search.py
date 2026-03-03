@@ -8,9 +8,11 @@ from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
 from lark import Lark, Transformer, v_args, ParseError
-from prisma import Prisma
-from prisma.bases import BasePost
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy import text
+from models import Post
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
 
 from search_cache import cache_fetch, cache_save
 
@@ -48,10 +50,6 @@ WORD: /[^\s()]+/
 SEARCH_PARSER = Lark(SEARCH_GRAMMAR, start='start', parser='lalr')
 SEARCH_FETCH_STEP = 1000
 
-
-class PostSearchable(BasePost):
-    id: int
-    content_search: Optional[str]
 
 
 class SearchCommands(TypedDict):
@@ -189,20 +187,23 @@ def parse_search_terms(ast: Union[list, dict]) -> Iterable[str]:
             yield from parse_search_terms(child)
 
 
-async def format_post_for_search(post: Union[PostSearchable, Post], db: Prisma, regenerate: bool = False) -> str:
+async def format_post_for_search(post: Post, db: AsyncSession, regenerate: bool = False) -> str:
     if not regenerate and post.content_search:
         return post.content_search
-    post = await db.post.find_unique(where={'id': post.id}, include={'tags': True})
-    tags = ' '.join([x.name[1:] for x in post.tags])
+    res = await db.exec(select(Post).where(Post.id == post.id).options(selectinload(Post.tags)).limit(1))
+    full_post = res.first()
+    tags = ' '.join([x.name[1:] for x in full_post.tags])
     content_search = ' '.join([
-        post.content_txt,
+        full_post.content_txt,
         tags,
-        f"{post.source}:{post.source}",
-        f"source:{post.source}",
-        f"user:{post.user}",
-        post.created_at.isoformat()
+        f"{full_post.source}:{full_post.source}",
+        f"source:{full_post.source}",
+        f"user:{full_post.user}",
+        full_post.created_at.isoformat()
     ])
-    await db.post.update(where={'id': post.id}, data={'content_search': content_search})
+    full_post.content_search = content_search
+    db.add(full_post)
+    await db.commit()
     return content_search
 
 
@@ -308,7 +309,7 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
 
 async def search_posts(
         fulltext: str,
-        db: Prisma,
+        db: AsyncSession,
         count: int = 40,
         min_score: int = 15,
         back_data: Optional[dict] = None,
@@ -357,16 +358,17 @@ async def search_posts(
     search_latest_hard_str = search_latest_hard.strftime('%Y-%m-%d')
     search_earliest_hard_str = search_earliest_hard.strftime('%Y-%m-%d')
     for term in search_terms:
-        # noinspection SqlNoDataSourceInspection
-        posts.extend(await PostSearchable.prisma(client=db).query_raw(
+        stmt = text(
             f"SELECT id, content_search "
             f"FROM Post WHERE "
             f"is_hidden = false "
-            f"AND MATCH(content_search) AGAINST(? IN BOOLEAN MODE) "
+            f"AND MATCH(content_search) AGAINST(:term IN BOOLEAN MODE) "
             f"AND (created_at BETWEEN '{search_earliest_hard_str} 00:00:00' AND '{search_latest_hard_str} 23:59:59') "
-            f"LIMIT {results_max * 10}",
-            term
-        ))
+            f"LIMIT {results_max * 10}"
+        )
+        res = await db.exec(stmt, params={"term": term})
+        for row in res.mappings():
+            posts.append(Post(id=row["id"], content_search=row["content_search"]))
     back_data.setdefault('time_goal_db', 0.0)
     back_data['time_goal_db'] += time.time() - time_db_start
 
@@ -403,7 +405,9 @@ async def search_posts(
     back_data['time_goal_fulltext'] += time.time() - time_goal_fulltext_start
 
     time_goal_matched_start = time.time()
-    matched_posts = await db.post.find_many(where={'id': {'in': list(matched_ids_score.keys())}}, include={'tags': True})
+    stmt = select(Post).where(Post.id.in_(list(matched_ids_score.keys()))).options(selectinload(Post.tags))
+    res = await db.exec(stmt)
+    matched_posts = res.all()
     back_data['time_goal_matched'] = time.time() - time_goal_matched_start
 
     time_goal_eval_start = time.time()
@@ -418,11 +422,12 @@ async def search_posts(
             matched_ids_score[post.id] *= 0.55
 
         # Penalize posts that are outside the search range
+        post_created_at = post.created_at.replace(tzinfo=timezone.utc) if post.created_at.tzinfo is None else post.created_at
         days_outside_search_range = 0
-        if post.created_at < search_earliest:
-            days_outside_search_range = (search_earliest - post.created_at).days
-        elif post.created_at > search_latest:
-            days_outside_search_range = (post.created_at - search_latest).days
+        if post_created_at < search_earliest:
+            days_outside_search_range = (search_earliest - post_created_at).days
+        elif post_created_at > search_latest:
+            days_outside_search_range = (post_created_at - search_latest).days
         if days_outside_search_range > 0:
             matched_ids_score[post.id] *= 0.9
         elif days_outside_search_range > 21:
@@ -460,7 +465,8 @@ async def search_posts(
             # Penalize posts that are older than the distinct age
             matched_posts = list(matched_posts)
             for post in matched_posts:
-                if post.created_at < search_latest - timedelta(days=distinct_age_days):
+                post_created_at = post.created_at.replace(tzinfo=timezone.utc) if post.created_at.tzinfo is None else post.created_at
+                if post_created_at < search_latest - timedelta(days=distinct_age_days):
                     matched_ids_score[post.id] *= (0.3 if not strict_search else 0)
 
     # After everything is adjusted, filter by min score again

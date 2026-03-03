@@ -3,8 +3,10 @@ import re
 from typing import AsyncIterable, List, Optional, TypedDict, Dict
 from enum import Enum
 
-from prisma import Prisma
-from prisma.models import Post, IoC
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, desc
+from sqlalchemy.orm import selectinload
+from models import Post, IoC
 from pydantic import BaseModel, Field
 
 from ai import prompt
@@ -49,20 +51,18 @@ class IoCLink(TypedDict):
     links: List[str]
 
 
-async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> AsyncIterable[IoC]:
+async def parse_iocs(db: AsyncSession, ids: Optional[List[int]] = None) -> AsyncIterable[IoC]:
     errors = []
 
     try:
         if not ids and ids is not None:
             return  # Nothing to tag
-        posts_where_filter = {'iocs_assigned': False, 'is_hidden': False}
+            
+        stmt = select(Post).where(Post.iocs_assigned == False, Post.is_hidden == False).order_by(desc(Post.id)).options(selectinload(Post.iocs))
         if ids:
-            assert ids is not None  # Pyright
-            posts_where_filter['id'] = {'in': ids}
-        posts_to_process = await db.post.find_many(
-            where=posts_where_filter,
-            order={'id': 'desc'}
-        )
+            stmt = stmt.where(Post.id.in_(ids))
+        res = await db.exec(stmt)
+        posts_to_process = res.all()
         print(f'[*] found {len(posts_to_process)} posts to parse IoCs from')
         for i, post in enumerate(posts_to_process):
             try:
@@ -70,7 +70,9 @@ async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> AsyncIterab
                 async for ioc in parse_iocs_from_post(post, db):
                     print(f'  [+] {ioc}')
                     yield ioc
-                await db.post.update(where={'id': post.id}, data={'iocs_assigned': True})
+                post.iocs_assigned = True
+                db.add(post)
+                await db.commit()
             except Exception as e:
                 errors.append(FetchError(f"Error parsing IoCs from post {post.id}", [e]))
     except Exception as e:
@@ -80,7 +82,7 @@ async def parse_iocs(db: Prisma, ids: Optional[List[int]] = None) -> AsyncIterab
         raise FetchError("Error parsing IoCs from posts", errors)
 
 
-async def parse_iocs_from_post(post: Post, db: Prisma) -> AsyncIterable[IoC]:
+async def parse_iocs_from_post(post: Post, db: AsyncSession) -> AsyncIterable[IoC]:
     # Truncate content to 2000 chars (enough for most IoCs)
     content = post.content_txt[:2000]
     response: List[AIIoC] = await prompt(
@@ -140,19 +142,28 @@ async def parse_iocs_from_post(post: Post, db: Prisma) -> AsyncIterable[IoC]:
         if is_valid:
             iocs[ioc_key] = {'ioc': ioc.value, 'type_main': type_main, 'type_secondary': type_secondary, 'comment': ioc.comment}
 
-    for ioc in iocs.values():
-        ioc = await db.ioc.create(
-            data={'value': ioc['ioc'], 'type': ioc['type_main'], 'subtype': ioc['type_secondary'], 'comment': ioc['comment']}
+    for ioc_val in iocs.values():
+        new_ioc = IoC(
+            value=ioc_val['ioc'], type=ioc_val['type_main'], subtype=ioc_val['type_secondary'], comment=ioc_val['comment']
         )
-        await db.post.update(where={'id': post.id}, data={'iocs': {'connect': [{'id': ioc.id}]}})
-        yield ioc
+        db.add(new_ioc)
+        await db.commit()
+        await db.refresh(new_ioc)
+        if new_ioc not in post.iocs:
+            post.iocs.append(new_ioc)
+            db.add(post)
+            await db.commit()
+        yield new_ioc
 
 
-async def search_iocs(search_term: str, db: Prisma) -> List[IoCLink]:
+async def search_iocs(search_term: str, db: AsyncSession) -> List[IoCLink]:
     posts_search = await search_posts(search_term, db)
     post_scores = {post.id: score['relevancy_score'] for post, score in posts_search}
     post_ids: List[int] = list(post_scores.keys())
-    iocs = await db.ioc.find_many(where={'posts': {'some': {'id': {'in': post_ids}}}}, include={'posts': True})
+    
+    stmt = select(IoC).where(IoC.posts.any(Post.id.in_(post_ids))).options(selectinload(IoC.posts))
+    res = await db.exec(stmt)
+    iocs = res.all()
 
     iocs_link: List[IoCLink] = []
     for ioc in iocs:

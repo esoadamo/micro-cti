@@ -5,7 +5,9 @@ from datetime import datetime, timezone, timedelta
 from typing import AsyncIterable, Optional, Tuple
 
 import atproto
-from prisma import Prisma
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, desc
+from models import Post
 
 from directories import FILE_CONFIG
 from .exception import FetchError
@@ -31,15 +33,17 @@ def get_bluesky_instance(cache={}) -> Optional[Tuple[atproto.Client, list[str]]]
     return cache['client'], cache['feeds']
 
 
-async def get_bluesky_posts(db: Prisma) -> AsyncIterable[any]:
+async def get_bluesky_posts(db: AsyncSession) -> AsyncIterable[any]:
     try:
         client, feeds = get_bluesky_instance()
         if client is None:
             return
         min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
-        max_post = await db.post.find_first(where={'source': 'bluesky'}, order={'created_at': 'desc'})
+        stmt = select(Post).where(Post.source == 'bluesky').order_by(desc(Post.created_at)).limit(1)
+        res = await db.exec(stmt)
+        max_post = res.first()
         if max_post is not None:
-            min_time = max_post.created_at
+            min_time = max_post.created_at.replace(tzinfo=timezone.utc) if max_post.created_at.tzinfo is None else max_post.created_at
     except Exception as e:
         raise FetchError("Error fetching Bluesky config", [e])
 
@@ -61,6 +65,8 @@ async def get_bluesky_posts(db: Prisma) -> AsyncIterable[any]:
                     user = b_post.post.author.handle
                     content_txt = b_post.post.record.text
                     created_at = datetime.fromisoformat(b_post.post.record.created_at)
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
                     source = "bluesky"
                     source_id = b_post.post.cid
                     url = f"https://bsky.app/profile/{user}/post/{b_post.post.uri.split('/')[-1]}"
@@ -71,21 +77,25 @@ async def get_bluesky_posts(db: Prisma) -> AsyncIterable[any]:
                         fetch_next_page = False
                         break
 
-                    if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                        # noinspection PyTypeChecker
-                        post = await db.post.create({
-                            'source': source,
-                            'source_id': source_id,
-                            'user': user,
-                            'url': url,
-                            'created_at': created_at,
-                            'fetched_at': datetime.now(tz=timezone.utc),
-                            'content_html': content_txt,
-                            'content_txt': content_txt,
-                            'is_ingested': len(content_txt.split()) < 3,
-                            'raw': json.dumps(raw, default=dict)
-                        })
-                        yield await db.post.find_unique(where={'id': post.id})
+                    stmt = select(Post).where(Post.source == source, Post.source_id == source_id).limit(1)
+                    res = await db.exec(stmt)
+                    if not res.first():
+                        post = Post(
+                            source=source,
+                            source_id=source_id,
+                            user=user,
+                            url=url,
+                            created_at=created_at,
+                            fetched_at=datetime.now(tz=timezone.utc),
+                            content_html=content_txt,
+                            content_txt=content_txt,
+                            is_ingested=len(content_txt.split()) < 3,
+                            raw=json.dumps(raw, default=dict)
+                        )
+                        db.add(post)
+                        await db.commit()
+                        await db.refresh(post)
+                        yield post
         except Exception as e:
             exceptions.append(e)
     if exceptions:

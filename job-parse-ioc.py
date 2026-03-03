@@ -3,6 +3,8 @@ import traceback
 
 from db import DBConnector
 from ioc import parse_iocs
+from sqlmodel import select
+from models import Post
 
 
 async def main() -> None:
@@ -10,15 +12,9 @@ async def main() -> None:
         step = 1000
         curr_id = 0
         while True:
-            posts = await db.post.find_many(
-                where={
-                    'is_hidden': False,
-                    'iocs': {'none': {}},
-                    'id': {'gt': curr_id},
-                },
-                take=step,
-                order={'id': 'asc'},
-            )
+            stmt = select(Post).where(Post.is_hidden == False, ~Post.iocs.any(), Post.id > curr_id).order_by(Post.id).limit(step)
+            res = await db.exec(stmt)
+            posts = res.all()
             print(f"[*] Fetched {len(posts)} posts without IoCs starting from id > {curr_id}")
             if not posts:
                 break

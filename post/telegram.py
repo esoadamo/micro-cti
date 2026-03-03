@@ -3,7 +3,9 @@ import tomllib
 from datetime import datetime, timezone
 from typing import AsyncIterable, Optional, Tuple, Set
 
-from prisma import Prisma
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
+from models import Post
 from telethon import TelegramClient
 
 from db import json_serial
@@ -28,7 +30,7 @@ def get_telegram_instance() -> Optional[Tuple[TelegramClient, Set[str]]]:
     return TelegramClient(f"{file_session.absolute()}", secrets['api_id'], secrets['api_hash']), set(secrets['chats'])
 
 
-async def get_telegram_posts(db: Prisma) -> AsyncIterable[any]:
+async def get_telegram_posts(db: AsyncSession) -> AsyncIterable[any]:
     errors = []
     try:
         telegram, chats = get_telegram_instance()
@@ -55,20 +57,25 @@ async def get_telegram_posts(db: Prisma) -> AsyncIterable[any]:
                             source_id = str(message.id)
                             raw = {'url': url, 'content': content_html, 'created_at': created_at, 'source': source,
                                    'sender_id': message.sender_id}
-                            if not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                                post = await db.post.create({
-                                    'source': source,
-                                    'source_id': source_id,
-                                    'user': dialog.name,
-                                    'url': url,
-                                    'created_at': created_at,
-                                    'fetched_at': datetime.now(tz=timezone.utc),
-                                    'content_html': content_html,
-                                    'content_txt': content_txt,
-                                    'is_ingested': len(content_txt.split()) < 3,
-                                    'raw': json.dumps(raw, default=json_serial)
-                                })
-                                yield await db.post.find_unique(where={'id': post.id})
+                            stmt = select(Post).where(Post.source == source, Post.source_id == source_id).limit(1)
+                            res = await db.exec(stmt)
+                            if not res.first():
+                                post = Post(
+                                    source=source,
+                                    source_id=source_id,
+                                    user=dialog.name,
+                                    url=url,
+                                    created_at=created_at,
+                                    fetched_at=datetime.now(tz=timezone.utc),
+                                    content_html=content_html,
+                                    content_txt=content_txt,
+                                    is_ingested=len(content_txt.split()) < 3,
+                                    raw=json.dumps(raw, default=json_serial)
+                                )
+                                db.add(post)
+                                await db.commit()
+                                await db.refresh(post)
+                                yield post
                         except Exception as e:
                             errors.append(e)
     except AssertionError as e:

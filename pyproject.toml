@@ -5,6 +5,7 @@ description = "OSINT app for collecting cybersecurity threat intelligence from m
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiomysql>=0.3.2",
     "atproto>=0.0.62",
     "beautifulsoup4>=4.14.2",
     "dictature>=0.14.0",
@@ -15,10 +16,11 @@ dependencies = [
     "markdown>=3.9",
     "mastodon-py>=2.1.4",
     "openai>=2.2.0",
-    "prisma>=0.15.0",
     "pyairtable>=3.2.0",
     "pydantic-ai>=1.0.17",
     "pydantic-ai-slim[mistral]>=1.0.17",
+    "sqlalchemy>=2.0.48",
+    "sqlmodel>=0.0.37",
     "telethon>=1.41.2",
     "tomli-w>=1.2.0",
 ]

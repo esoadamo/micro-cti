@@ -6,8 +6,9 @@ from email.utils import parsedate_to_datetime
 from typing import AsyncIterable, List
 
 import feedparser
-from prisma import Prisma
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, desc
+from models import Post
 
 from db import json_serial
 from directories import FILE_CONFIG
@@ -24,7 +25,7 @@ def get_rss_feeds() -> List[dict]:
             return []
 
 
-async def get_rss_posts(db: Prisma) -> AsyncIterable[Post]:
+async def get_rss_posts(db: AsyncSession) -> AsyncIterable[Post]:
     feeds = get_rss_feeds()
     exceptions = []
     for feed in feeds:
@@ -33,8 +34,13 @@ async def get_rss_posts(db: Prisma) -> AsyncIterable[Post]:
             source = feed['name']
             date_now = datetime.now(tz=timezone.utc)
 
-            max_post = await db.post.find_first(where={'source': source}, order={'created_at': 'desc'})
-            min_post_time = max_post.created_at if max_post else datetime.now(tz=timezone.utc) - timedelta(days=1)
+            stmt = select(Post).where(Post.source == source).order_by(desc(Post.created_at)).limit(1)
+            res = await db.exec(stmt)
+            max_post = res.first()
+            if max_post and max_post.created_at:
+                min_post_time = max_post.created_at.replace(tzinfo=timezone.utc) if max_post.created_at.tzinfo is None else max_post.created_at
+            else:
+                min_post_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
 
             for rss_post in feedparser.parse(
                 feed['url'],
@@ -48,6 +54,9 @@ async def get_rss_posts(db: Prisma) -> AsyncIterable[Post]:
                 except AttributeError:
                     continue
 
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+
                 if created_at < min_post_time:
                     continue
 
@@ -59,19 +68,25 @@ async def get_rss_posts(db: Prisma) -> AsyncIterable[Post]:
                 except AttributeError:
                     continue
                 content_txt = read_html(content_html)
-                if len(content_txt.split()) > 3 and not await db.post.find_first(where={'source': source, 'source_id': source_id}):
-                    post = await db.post.create({
-                        'source': source,
-                        'source_id': source_id,
-                        'user': author,
-                        'url': url,
-                        'created_at': created_at,
-                        'fetched_at': datetime.now(tz=timezone.utc),
-                        'content_html': content_html,
-                        'content_txt': content_txt,
-                        'raw': json.dumps(rss_post, default=json_serial)
-                    })
-                    yield await db.post.find_unique(where={'id': post.id})
+                stmt = select(Post).where(Post.source == source, Post.source_id == source_id).limit(1)
+                res = await db.exec(stmt)
+                if len(content_txt.split()) > 3 and not res.first():
+                    post = Post(
+                        source=source,
+                        source_id=source_id,
+                        user=author,
+                        url=url,
+                        created_at=created_at,
+                        fetched_at=datetime.now(tz=timezone.utc),
+                        content_html=content_html,
+                        content_txt=content_txt,
+                        is_ingested=len(content_txt.split()) < 3,
+                        raw=json.dumps(rss_post, default=json_serial)
+                    )
+                    db.add(post)
+                    await db.commit()
+                    await db.refresh(post)
+                    yield post
         except Exception as e:
             exceptions.append(e)
     if exceptions:

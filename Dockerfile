@@ -7,9 +7,7 @@ COPY ./pyproject.toml /app/pyproject.toml
 COPY ./.python-version /app/.python-version
 COPY ./uv.lock /app/uv.lock
 RUN uv sync --locked
-COPY ./schema.prisma /app/schema.prisma
 ENV DATABASE_URL="mysql://root:microcti1234@micro-cti-db:3306/microcti"
-RUN uv run prisma generate
 ENV UCTI_LOG_DIR="/var/log/ucti"
 ENV UCTI_DATA_DIR="/data"
 ENV UCTI_BACKUP_DIR="/backup"

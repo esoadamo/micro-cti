@@ -3,6 +3,9 @@ import asyncio
 
 from db import DBConnector
 from directories import DIR_BACKUP
+from models import Post
+from sqlmodel import select, or_
+from sqlalchemy.orm import selectinload
 
 
 async def main() -> None:
@@ -15,12 +18,9 @@ async def main() -> None:
         with gzip.open(file_backup, 'wt') as f:
             while True:
                 print(f'[*] Next batch starting from id: {curr_id}\r', end='', flush=True)
-                posts = await db.post.find_many(
-                    where={'OR': [{'is_hidden': False}, {'is_ingested': False}], 'id': {'gt': curr_id}},
-                    take=step,
-                    order={'id': 'asc'},
-                    include={'tags': True}
-                )
+                stmt = select(Post).where(or_(Post.is_hidden == False, Post.is_ingested == False), Post.id > curr_id).order_by(Post.id).limit(step).options(selectinload(Post.tags))
+                res = await db.exec(stmt)
+                posts = res.all()
                 if not posts:
                     break
                 curr_id = posts[-1].id

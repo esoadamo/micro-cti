@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, JSO
 from fastapi.exceptions import HTTPException
 from fastapi.templating import Jinja2Templates
 from lark import ParseError
-from prisma import Prisma
+from sqlmodel.ext.asyncio.session import AsyncSession
 # noinspection PyPackageRequirements,PyProtectedMember
 from starlette.templating import _TemplateResponse
 from typing_extensions import TypedDict
@@ -69,7 +69,7 @@ def render_template(filename, request, headers=None, **context):
     )
 
 
-DBDeps = Annotated[Prisma, Depends(get_db_session)]
+DBDeps = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 @app.get("/", response_class=HTMLResponse)

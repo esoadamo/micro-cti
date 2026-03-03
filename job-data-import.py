@@ -3,13 +3,15 @@ import gzip
 import asyncio
 from typing import List
 
-from prisma import Prisma
-from prisma.models import Post
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
+from sqlalchemy.orm import selectinload
+from models import Post, Tag
 
 from db import DBConnector
 
 
-async def process_post_data(db: Prisma, post_line: str, semaphore: asyncio.Semaphore) -> None:
+async def process_post_data(db: AsyncSession, post_line: str, semaphore: asyncio.Semaphore) -> None:
     """Process a single post with semaphore-controlled concurrency"""
     async with semaphore:
         try:
@@ -22,26 +24,36 @@ async def process_post_data(db: Prisma, post_line: str, semaphore: asyncio.Semap
             del data['tags']
             del data['iocs']
 
-            # Find existing post or create new one
-            existing_post = await db.post.find_unique(where={'id': post.id})
+            existing_post = await db.get(Post, post.id)
             if not existing_post:
-                db_post = await db.post.create(data=data)
+                db_post = Post(**data)
+                db.add(db_post)
+                await db.commit()
+                await db.refresh(db_post)
             else:
                 db_post = existing_post
 
             # Process tags if they exist
             if tags:
+                stmt_post = select(Post).where(Post.id == db_post.id).options(selectinload(Post.tags))
+                res_post = await db.exec(stmt_post)
+                db_post = res_post.one()
+                
                 for tag in tags:
-                    del tag['id']
-                    del tag['posts']
-                    db_tag = await db.tag.upsert(
-                        where={'name': tag['name']},
-                        data={'create': tag, 'update': {}}
-                    )
-                    await db.post.update(
-                        where={'id': db_post.id},
-                        data={'tags': {'connect': [{'id': db_tag.id}]}}
-                    )
+                    tag_name = tag['name']
+                    stmt = select(Tag).where(Tag.name == tag_name).limit(1)
+                    res = await db.exec(stmt)
+                    db_tag = res.first()
+                    if not db_tag:
+                        db_tag = Tag(name=tag_name)
+                        db.add(db_tag)
+                        await db.commit()
+                        await db.refresh(db_tag)
+                        
+                    if db_tag not in db_post.tags:
+                        db_post.tags.append(db_tag)
+                        db.add(db_post)
+                await db.commit()
 
         except Exception as e:
             print(f'[!] Error processing post: {e}', flush=True)

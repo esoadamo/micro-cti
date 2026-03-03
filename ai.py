@@ -5,7 +5,7 @@ from random import choice
 from typing import TypeVar, List, Union
 
 import mistralai
-from prisma.models import Post
+from models import Post
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
