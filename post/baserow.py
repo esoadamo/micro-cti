@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tomllib
 from datetime import datetime, timezone
@@ -35,7 +36,7 @@ async def get_baserow_posts(db: AsyncSession) -> AsyncIterable[Post]:
             "Content-Type": "application/json"
         }
 
-        response = requests.get(f"{base_url}/database/rows/table/{table_id}/?user_field_names=true", headers=headers)
+        response = await asyncio.to_thread(requests.get, f"{base_url}/database/rows/table/{table_id}/?user_field_names=true", headers=headers)
         response.raise_for_status()
         results = response.json()['results']
 
@@ -74,6 +75,7 @@ async def get_baserow_posts(db: AsyncSession) -> AsyncIterable[Post]:
                 await db.refresh(post)
                 yield post
             # Delete the row after processing (similar to Airtable behavior)
-            requests.delete(f"{base_url}/database/rows/table/{table_id}/{row_id}/", headers=headers).raise_for_status()
+            delete_resp = await asyncio.to_thread(requests.delete, f"{base_url}/database/rows/table/{table_id}/{row_id}/", headers=headers)
+            delete_resp.raise_for_status()
     except Exception as e:
         raise FetchError("Error fetching Baserow posts", [e])

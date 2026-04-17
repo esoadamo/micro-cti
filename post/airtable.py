@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tomllib
 from datetime import datetime, timezone
@@ -35,7 +36,8 @@ async def get_airtable_posts(db: AsyncSession) -> AsyncIterable[Post]:
         if airtable is None:
             return
 
-        for record in airtable.all():
+        all_records = await asyncio.to_thread(airtable.all)
+        for record in all_records:
             record_id = record["id"]
             record_fields = record["fields"]
             created_at = datetime.fromisoformat(record["createdTime"])
@@ -69,6 +71,6 @@ async def get_airtable_posts(db: AsyncSession) -> AsyncIterable[Post]:
                 await db.commit()
                 await db.refresh(post)
                 yield post
-            airtable.delete(record_id)
+            await asyncio.to_thread(airtable.delete, record_id)
     except Exception as e:
         raise FetchError("Error fetching Airtable posts", [e])

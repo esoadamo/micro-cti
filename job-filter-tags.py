@@ -7,6 +7,8 @@ from sqlmodel import select, desc
 from sqlalchemy.orm import selectinload
 from models import Tag, Post
 
+from db import DBConnector
+
 
 async def get_tags(db: AsyncSession, max_tag_id: int, step: int) -> AsyncIterable[List[Tag]]:
     for tag_id_min_curr in range(0, max_tag_id, step):
@@ -19,7 +21,7 @@ async def get_tags(db: AsyncSession, max_tag_id: int, step: int) -> AsyncIterabl
 
 async def main() -> int:
     print('[*] Process started')
-    async with DBConnector.get() as db:
+    async with DBConnector() as db:
         step = 500
 
         print('[*] Loading tags')

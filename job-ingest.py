@@ -19,42 +19,44 @@ def print_post(post: Post):
     print(f'[-]{"[-]" if post.is_hidden else "[+]"} {content} - {post.user}@{post.source}')
 
 
-async def fetch_posts(prefix: str, function: Callable[[AsyncSession], AsyncIterable[Post]], db: AsyncSession) -> List[Exception]:
+async def fetch_posts(prefix: str, function: Callable[[AsyncSession], AsyncIterable[Post]]) -> List[Exception]:
+    """Fetch posts using a dedicated DB session per coroutine to avoid concurrent session access."""
     exceptions: List[Exception] = []
     post_ids: List[int] = []
     print(f'[*] {prefix} fetching')
-    try:
-        async for post in function(db):
-            print_post(post)
-            post_ids.append(post.id)
-        print(f'[*] {prefix} fetched')
-    except Exception as e:
-        print(f'[!] {prefix} fetch failed: {e}')
-        exceptions.append(e)
+    async with DBConnector() as db:
+        try:
+            async for post in function(db):
+                print_post(post)
+                post_ids.append(post.id)
+            print(f'[*] {prefix} fetched')
+        except Exception as e:
+            print(f'[!] {prefix} fetch failed: {e}')
+            exceptions.append(e)
 
-    try:
-        print(f'[*] {prefix} ingesting posts')
-        await ingest_posts(db, post_ids)
-    except Exception as e:
-        print(f'[!] {prefix} ingestion failed: {e}')
-        exceptions.append(e)
+        try:
+            print(f'[*] {prefix} ingesting posts')
+            await ingest_posts(db, post_ids)
+        except Exception as e:
+            print(f'[!] {prefix} ingestion failed: {e}')
+            exceptions.append(e)
 
-    try:
-        print(f'[*] {prefix} generating tags')
-        await generate_tags(db, post_ids)
-        print(f'[*] {prefix} tags generated')
-    except Exception as e:
-        print(f'[!] {prefix} tag generation failed: {e}')
-        exceptions.append(e)
+        try:
+            print(f'[*] {prefix} generating tags')
+            await generate_tags(db, post_ids)
+            print(f'[*] {prefix} tags generated')
+        except Exception as e:
+            print(f'[!] {prefix} tag generation failed: {e}')
+            exceptions.append(e)
 
-    try:
-        print(f'[*] {prefix} parsing IoCs')
-        async for _ in parse_iocs(db, post_ids):
-            pass  # IoCs are processed and stored within parse_iocs
-        print(f'[*] {prefix} IoCs parsed')
-    except Exception as e:
-        print(f'[!] {prefix} IoC parsing failed: {e}')
-        exceptions.append(e)
+        try:
+            print(f'[*] {prefix} parsing IoCs')
+            async for _ in parse_iocs(db, post_ids):
+                pass  # IoCs are processed and stored within parse_iocs
+            print(f'[*] {prefix} IoCs parsed')
+        except Exception as e:
+            print(f'[!] {prefix} IoC parsing failed: {e}')
+            exceptions.append(e)
 
     if exceptions:
         print(f'[!] {prefix} completed with errors')
@@ -93,15 +95,14 @@ async def main() -> int:
         print('[*] All done')
     else:
         print('[*] Fetching started')
-        async with (await DBConnector.get()) as db:
-            exceptions_2d = await asyncio.gather(
-                fetch_posts('Telegram', get_telegram_posts, db),
-                fetch_posts('RSS', get_rss_posts, db),
-                fetch_posts('Mastodon', get_mastodon_posts, db),
-                fetch_posts('Airtable', get_airtable_posts, db),
-                fetch_posts('Baserow', get_baserow_posts, db),
-                fetch_posts('Bluesky', get_bluesky_posts, db)
-            )
+        exceptions_2d = await asyncio.gather(
+            fetch_posts('Telegram', get_telegram_posts),
+            fetch_posts('RSS', get_rss_posts),
+            fetch_posts('Mastodon', get_mastodon_posts),
+            fetch_posts('Airtable', get_airtable_posts),
+            fetch_posts('Baserow', get_baserow_posts),
+            fetch_posts('Bluesky', get_bluesky_posts)
+        )
         exceptions = list(chain(*exceptions_2d))
         print('[*] Fetching finished')
 

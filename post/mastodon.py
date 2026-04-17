@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import tomllib
@@ -53,7 +54,7 @@ async def get_mastodon_posts(db: AsyncSession, min_id: int = None, save: bool = 
         max_id = None
 
         while not ended:
-            timeline = mastodon.timeline_home(min_id=min_id, max_id=max_id)
+            timeline = await asyncio.to_thread(mastodon.timeline_home, min_id=min_id, max_id=max_id)
             if not timeline:
                 print('[*] Nothing more to check, exiting')
                 break
@@ -94,7 +95,7 @@ async def get_mastodon_posts(db: AsyncSession, min_id: int = None, save: bool = 
                 if mastodon.ratelimit_remaining <= 1:
                     sleep_time = max(0, mastodon.ratelimit_reset - time.time())
                     print(f'[*] Ratelimit reached, sleeping for {sleep_time} s until {mastodon.ratelimit_reset}')
-                    time.sleep(sleep_time)
-                time.sleep(1)
+                    await asyncio.sleep(sleep_time)
+                await asyncio.sleep(1)
     except Exception as e:
         raise FetchError("Error fetching Mastodon posts", [e])

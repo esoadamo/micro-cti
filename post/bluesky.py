@@ -1,5 +1,5 @@
+import asyncio
 import json
-import time
 import tomllib
 from datetime import datetime, timezone, timedelta
 from typing import AsyncIterable, Optional, Tuple
@@ -59,7 +59,7 @@ async def get_bluesky_posts(db: AsyncSession) -> AsyncIterable[any]:
                     'limit': 50,
                     'cursor': cursor
                 }, headers={'Accept-Language': 'en'})
-                time.sleep(10)
+                await asyncio.sleep(10)
                 cursor = response.cursor
                 for b_post in response.feed:
                     user = b_post.post.author.handle

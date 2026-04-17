@@ -15,7 +15,7 @@ services:
       - ./cache:/cache
       - ./config:/config:ro
   micro-cti-db:
-    image: mariadb:lts
+    image: docker.io/library/mariadb:lts
     container_name: micro-cti-db
     restart: always
     ports:
