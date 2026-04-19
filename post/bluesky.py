@@ -21,13 +21,13 @@ def get_bluesky_secrets() -> Optional[dict]:
 
 
 # noinspection PyDefaultArgument
-def get_bluesky_instance(cache={}) -> Optional[Tuple[atproto.Client, list[str]]]:
+async def get_bluesky_instance(cache={}) -> Optional[Tuple[atproto.AsyncClient, list[str]]]:
     if 'client' not in cache:
         secrets = get_bluesky_secrets()
         if secrets is None:
             return None
-        client = atproto.Client()
-        client.login(secrets['handle'], secrets['app_password'])
+        client = atproto.AsyncClient()
+        await client.login(secrets['handle'], secrets['app_password'])
         cache['client'] = client
         cache['feeds'] = secrets['feeds']
     return cache['client'], cache['feeds']
@@ -35,9 +35,10 @@ def get_bluesky_instance(cache={}) -> Optional[Tuple[atproto.Client, list[str]]]
 
 async def get_bluesky_posts(db: AsyncSession) -> AsyncIterable[any]:
     try:
-        client, feeds = get_bluesky_instance()
-        if client is None:
+        instance = await get_bluesky_instance()
+        if instance is None:
             return
+        client, feeds = instance
         min_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
         stmt = select(Post).where(Post.source == 'bluesky').order_by(desc(Post.created_at)).limit(1)
         res = await db.exec(stmt)
@@ -54,7 +55,7 @@ async def get_bluesky_posts(db: AsyncSession) -> AsyncIterable[any]:
             fetch_next_page = True
             cursor = ''
             while fetch_next_page:
-                response = client.app.bsky.feed.get_feed({
+                response = await client.app.bsky.feed.get_feed({
                     'feed': feed,
                     'limit': 50,
                     'cursor': cursor

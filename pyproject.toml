@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiomysql>=0.3.2",
-    "atproto>=0.0.62",
+    "atproto>=0.0.65",
     "beautifulsoup4>=4.14.2",
     "dictature>=0.14.0",
     "fastapi[standard]>=0.118.2",

@@ -42,10 +42,12 @@ async def get_rss_posts(db: AsyncSession) -> AsyncIterable[Post]:
             else:
                 min_post_time = datetime.now(tz=timezone.utc) - timedelta(days=1)
 
-            for rss_post in feedparser.parse(
+            feed_data = await asyncio.to_thread(
+                feedparser.parse,
                 feed['url'],
                 agent=f'RSS Reader {date_now.year}.{date_now.month}'
-            ).entries:
+            )
+            for rss_post in feed_data.entries:
                 try:
                     created_at = datetime.fromisoformat(rss_post.published)
                 except ValueError:
