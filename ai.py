@@ -3,6 +3,7 @@ import tomllib
 from http.client import responses
 from random import choice
 from typing import TypeVar, List, Union
+from os import environ
 
 import mistralai
 from models import Post
@@ -79,7 +80,10 @@ async def prompt_tags(text: str) -> list[str]:
     truncated_text = text[:400].replace("\n", " ")
     
     response = await prompt(
-        "Generate max 7 cybersecurity hashtags in camelCase English. Format: #HashtagName per line.",
+        environ.get(
+            "SYSTEM_PROMPT_GENERATE_TAGS",
+            "Generate max 7 cybersecurity hashtags in camelCase English. Format: #HashtagName per line."
+        ),
         truncated_text,
         list[str]
     )
@@ -92,7 +96,10 @@ async def prompt_check_cybersecurity_post(post: Post) -> bool:
     truncated_content = post.content_txt[:500].replace("\n", " ")
     
     return await prompt(
-        "Is this post in English about cybersecurity (tools, attacks, vulnerabilities, threats, exploits, hacks)? Answer True/False.",
+        environ.get(
+            "SYSTEM_PROMPT_CLASSIFY_POST",
+            "Is this post in English about cybersecurity (tools, attacks, vulnerabilities, threats, exploits, hacks)? Answer True/False."
+        ),
         truncated_content,
         bool
     )
