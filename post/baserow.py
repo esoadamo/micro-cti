@@ -44,6 +44,7 @@ async def get_baserow_posts(db: AsyncSession) -> AsyncIterable[Post]:
             row_id = row["id"]
             created_at = datetime.fromisoformat(row["created_on"]) if "created_on" in row else datetime.now(
                 tz=timezone.utc)
+            ingestable = True
 
             try:
                 user = row.get("Account", "")
@@ -52,28 +53,30 @@ async def get_baserow_posts(db: AsyncSession) -> AsyncIterable[Post]:
                 source = row.get("Source", "baserow")
                 source_id = str(row.get("Id", row_id))
                 raw = json.dumps(row)
-            except (KeyError, TypeError):
-                continue
+                assert content_text and user and url
+            except (KeyError, TypeError, AssertionError):
+                ingestable = False
 
-            stmt = select(Post).where(Post.source == source, Post.source_id == source_id).limit(1)
-            res = await db.exec(stmt)
-            if not res.first():
-                post = Post(
-                    source=source,
-                    source_id=source_id,
-                    user=user,
-                    url=url,
-                    created_at=created_at,
-                    fetched_at=datetime.now(tz=timezone.utc),
-                    content_html=content_html,
-                    content_txt=content_text,
-                    is_ingested=len(content_text.split()) < 3,
-                    raw=raw
-                )
-                db.add(post)
-                await db.commit()
-                await db.refresh(post)
-                yield post
+            if ingestable:
+                stmt = select(Post).where(Post.source == source, Post.source_id == source_id).limit(1)
+                res = await db.exec(stmt)
+                if not res.first():
+                    post = Post(
+                        source=source,
+                        source_id=source_id,
+                        user=user,
+                        url=url,
+                        created_at=created_at,
+                        fetched_at=datetime.now(tz=timezone.utc),
+                        content_html=content_html,
+                        content_txt=content_text,
+                        is_ingested=len(content_text.split()) < 3,
+                        raw=raw
+                    )
+                    db.add(post)
+                    await db.commit()
+                    await db.refresh(post)
+                    yield post
             # Delete the row after processing (similar to Airtable behavior)
             delete_resp = await asyncio.to_thread(requests.delete, f"{base_url}/database/rows/table/{table_id}/{row_id}/", headers=headers)
             delete_resp.raise_for_status()
