@@ -34,16 +34,17 @@ async def fetch_posts(prefix: str, function: Callable[[AsyncSession], AsyncItera
             print(f'[!] {prefix} fetch failed: {e}')
             exceptions.append(e)
 
+        precomputed_tags = {}
         try:
             print(f'[*] {prefix} ingesting posts')
-            await ingest_posts(db, post_ids)
+            await ingest_posts(db, post_ids, precomputed_tags=precomputed_tags)
         except Exception as e:
             print(f'[!] {prefix} ingestion failed: {e}')
             exceptions.append(e)
 
         try:
             print(f'[*] {prefix} generating tags')
-            await generate_tags(db, post_ids)
+            await generate_tags(db, post_ids, precomputed_tags=precomputed_tags)
             print(f'[*] {prefix} tags generated')
         except Exception as e:
             print(f'[!] {prefix} tag generation failed: {e}')
@@ -72,15 +73,16 @@ async def main() -> int:
     if '--no-fetch' in sys.argv:
         print('[*] Ingesting uningested posts')
         async with DBConnector() as db:
+            precomputed_tags = {}
             try:
-                await ingest_posts(db)
+                await ingest_posts(db, precomputed_tags=precomputed_tags)
                 print('[*] Ingesting posts successfully')
             except Exception as e:
                 print('[!] Error ingesting posts')
                 exceptions.append(e)
             print('[*] Generating tags for untagged posts')
             try:
-                await generate_tags(db)
+                await generate_tags(db, precomputed_tags=precomputed_tags)
                 print('[*] Generating tags successfully')
             except Exception as e:
                 print('[!] Error generating tags')

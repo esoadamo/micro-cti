@@ -62,5 +62,6 @@ This project includes several job scripts for data ingestion, maintenance, and e
 - **job-tag.py**: Ingests all posts and generates tags for them. **Run ad-hoc when necessary.**
 - **job-telegram-list-channels.py**: Lists all Telegram channels currently included/excluded in the configuration. **Run ad-hoc when necessary.**
 - **job-filter-posts.py**: Scans all visible posts and hides those not related to cybersecurity. **Run ad-hoc when necessary.**
+- **delete-baserow-records.py**: Deletes every record from the configured Baserow table. **Run ad-hoc and pass `--yes` when necessary.**
 
 Refer to each script for more details on its usage and output.

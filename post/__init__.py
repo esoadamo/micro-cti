@@ -13,14 +13,14 @@ This module is organized into submodules by platform:
 
 import re
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, desc
 from sqlalchemy.orm import selectinload
 from models import Post, Tag
 
-from ai import prompt_tags, prompt_check_cybersecurity_post
+from ai import prompt_tags, prompt_check_cybersecurity_post, prompt_classify_and_tag_post
 from search import format_post_for_search
 from .airtable import (
     get_airtable_secrets,
@@ -60,8 +60,14 @@ from .utils import (
 )
 
 
-async def ingest_posts(db: AsyncSession, ids: Optional[List[int]] = None) -> None:
+async def ingest_posts(
+    db: AsyncSession,
+    ids: Optional[List[int]] = None,
+    precomputed_tags: Optional[Dict[int, List[str]]] = None,
+) -> None:
     errors = []
+    if precomputed_tags is None:
+        precomputed_tags = {}
 
     try:
         if not ids and ids is not None:
@@ -78,7 +84,7 @@ async def ingest_posts(db: AsyncSession, ids: Optional[List[int]] = None) -> Non
         for i, post in enumerate(uningested_posts):
             try:
                 print(f'[*] ingesting {i + 1}th post out of {len(uningested_posts)} total')
-                visible = await hide_post_if_not_about_cybersecurity(post, db)
+                visible = await hide_post_if_not_about_cybersecurity(post, db, precomputed_tags=precomputed_tags)
                 if visible:
                     await format_post_for_search(post, db, regenerate=True)
                 print(f'[-] post {"hidden" if not visible else "kept"} after ingestion')
@@ -94,7 +100,16 @@ async def ingest_posts(db: AsyncSession, ids: Optional[List[int]] = None) -> Non
         raise FetchError("Error ingesting posts", errors)
 
 
-async def generate_tags(db: AsyncSession, ids: Optional[List[int]] = None) -> None:
+def _should_generate_ai_tags(post_content: str) -> bool:
+    tag_names = set(re.findall(r'#\w+', post_content))
+    return len(post_content.split()) > 15 and len(tag_names) < 3
+
+
+async def generate_tags(
+    db: AsyncSession,
+    ids: Optional[List[int]] = None,
+    precomputed_tags: Optional[Dict[int, List[str]]] = None,
+) -> None:
     errors = []
 
     try:
@@ -117,9 +132,12 @@ async def generate_tags(db: AsyncSession, ids: Optional[List[int]] = None) -> No
 
                 tag_names = set(re.findall(r'#\w+', post_content))
 
-                # Only call AI if post has enough content AND no existing hashtags
-                if len(post_content.split()) > 15 and len(tag_names) < 3:
-                    tag_names.update(sorted(set(await prompt_tags(post_content)), key=len)[:7])
+                if _should_generate_ai_tags(post_content):
+                    if precomputed_tags is not None and post.id is not None and post.id in precomputed_tags:
+                        generated_tags = precomputed_tags[post.id]
+                    else:
+                        generated_tags = await prompt_tags(post_content)
+                    tag_names.update(sorted(set(generated_tags), key=len)[:7])
 
                 tag_names = {x.upper() for x in tag_names}
                 print("[-]", tag_names)
@@ -153,7 +171,12 @@ async def generate_tags(db: AsyncSession, ids: Optional[List[int]] = None) -> No
         raise FetchError("Error generating tags", errors)
 
 
-async def hide_post_if_not_about_cybersecurity(post: Post, db, force_ai: bool = False) -> bool:
+async def hide_post_if_not_about_cybersecurity(
+    post: Post,
+    db,
+    force_ai: bool = False,
+    precomputed_tags: Optional[Dict[int, List[str]]] = None,
+) -> bool:
     keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing',
                           'bypass', 'outage', 'steal', 'malicious', 'compromise'}
     post_content = post.content_txt.lower()
@@ -161,6 +184,12 @@ async def hide_post_if_not_about_cybersecurity(post: Post, db, force_ai: bool = 
     post_content = re.sub(r'@\S+', '', post_content)
     if not force_ai and any(keyword.lower() in post_content for keyword in keywords_whitelist):
         visible = True
+    elif precomputed_tags is not None:
+        include_tags = _should_generate_ai_tags(post.content_txt[:1000])
+        assessment = await prompt_classify_and_tag_post(post, include_tags)
+        visible = assessment.is_cybersecurity
+        if visible and include_tags and post.id is not None:
+            precomputed_tags[post.id] = [tag for tag in assessment.tags if tag.startswith('#')]
     else:
         visible = await prompt_check_cybersecurity_post(post)
     if visible == post.is_hidden:

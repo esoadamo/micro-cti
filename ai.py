@@ -4,6 +4,7 @@ from http.client import responses
 from random import choice
 from typing import TypeVar, List, Union
 from os import environ
+from pydantic import BaseModel, Field
 
 import mistralai
 from models import Post
@@ -19,6 +20,11 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from directories import FILE_CONFIG
 
 T = TypeVar("T")
+
+
+class CybersecurityPostAssessment(BaseModel):
+    is_cybersecurity: bool
+    tags: list[str] = Field(default_factory=list)
 
 
 def get_model() -> Model:
@@ -102,6 +108,28 @@ async def prompt_check_cybersecurity_post(post: Post) -> bool:
         ),
         truncated_content,
         bool
+    )
+
+
+async def prompt_classify_and_tag_post(post: Post, include_tags: bool) -> CybersecurityPostAssessment:
+    truncated_content = post.content_txt[:500].replace("\n", " ")
+    system_prompt = environ.get(
+        "SYSTEM_PROMPT_CLASSIFY_AND_TAG_POST",
+        (
+            f"{environ.get('SYSTEM_PROMPT_CLASSIFY_POST', 'Determine whether this post is in English and about cybersecurity (tools, attacks, vulnerabilities, threats, exploits, or hacks).')} "
+            "Return whether the post is about cybersecurity in the is_cybersecurity field. "
+            "Do not respond with a standalone True or False. "
+            "If it is about cybersecurity, then return up to 7 English cybersecurity "
+            "hashtags in camelCase, each starting with #, in the tags field. Otherwise, return an empty tags list."
+        ),
+    )
+    if not include_tags:
+        system_prompt += " Tag generation is not requested for this post; return an empty tags list."
+
+    return await prompt(
+        system_prompt,
+        truncated_content,
+        CybersecurityPostAssessment,
     )
 
 
