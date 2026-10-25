@@ -20,7 +20,8 @@ from sqlmodel import select, desc
 from sqlalchemy.orm import selectinload
 from models import Post, Tag
 
-from ai import prompt_tags, prompt_check_cybersecurity_post, prompt_classify_and_tag_post
+from ai import (prompt_tags, prompt_tags_batch, prompt_check_cybersecurity_post,
+                prompt_classify_and_tag_post, prompt_classify_and_tag_posts_batch)
 from search import format_post_for_search
 from .airtable import (
     get_airtable_secrets,
@@ -64,10 +65,14 @@ async def ingest_posts(
     db: AsyncSession,
     ids: Optional[List[int]] = None,
     precomputed_tags: Optional[Dict[int, List[str]]] = None,
+    batch_size: int = 10,
 ) -> None:
     errors = []
     if precomputed_tags is None:
         precomputed_tags = {}
+
+    keywords_whitelist = {'infosec', 'cybersec', 'vuln', 'hack', 'exploit', 'deepfake', 'threat', 'leak', 'phishing',
+                          'bypass', 'outage', 'steal', 'malicious', 'compromise'}
 
     try:
         if not ids and ids is not None:
@@ -81,18 +86,66 @@ async def ingest_posts(
         uningested_posts = res.all()
         print(f'[*] found {len(uningested_posts)} posts to ingest')
 
-        for i, post in enumerate(uningested_posts):
+        # Partition posts into keyword-matched (no AI needed) and AI-needed
+        keyword_matched_posts: List[Post] = []
+        ai_needed_posts: List[Post] = []
+
+        for post in uningested_posts:
+            post_content = post.content_txt.lower()
+            post_content = re.sub(r'@\S+', '', post_content)
+            if any(keyword in post_content for keyword in keywords_whitelist):
+                keyword_matched_posts.append(post)
+            else:
+                ai_needed_posts.append(post)
+
+        print(f'[*] {len(keyword_matched_posts)} keyword-matched, {len(ai_needed_posts)} need AI classification')
+
+        # Process keyword-matched posts (visible without AI)
+        for i, post in enumerate(keyword_matched_posts):
             try:
-                print(f'[*] ingesting {i + 1}th post out of {len(uningested_posts)} total')
-                visible = await hide_post_if_not_about_cybersecurity(post, db, precomputed_tags=precomputed_tags)
+                print(f'[*] ingesting keyword-matched post {i + 1}/{len(keyword_matched_posts)}')
+                visible = True
+                if visible == post.is_hidden:
+                    post.is_hidden = not visible
+                    db.add(post)
+                    await db.commit()
                 if visible:
                     await format_post_for_search(post, db, regenerate=True)
-                print(f'[-] post {"hidden" if not visible else "kept"} after ingestion')
+                    # Store precomputed tags if applicable
+                    if _should_generate_ai_tags(post.content_txt[:1000]):
+                        pass  # Tags will be generated in generate_tags
+                print(f'[-] post kept after ingestion (keyword match)')
                 post.is_ingested = True
                 db.add(post)
                 await db.commit()
             except Exception as e:
                 errors.append(FetchError(f"Error ingesting {post.id}", [e]))
+
+        # Batch-classify AI-needed posts
+        if ai_needed_posts:
+            print(f'[*] batch-classifying {len(ai_needed_posts)} posts (batch_size={batch_size})')
+            assessments = await prompt_classify_and_tag_posts_batch(
+                ai_needed_posts, include_tags=True, batch_size=batch_size
+            )
+            for i, (post, assessment) in enumerate(zip(ai_needed_posts, assessments)):
+                try:
+                    print(f'[*] processing AI-classified post {i + 1}/{len(ai_needed_posts)}')
+                    visible = assessment.is_cybersecurity
+                    include_tags = _should_generate_ai_tags(post.content_txt[:1000])
+                    if visible and include_tags and post.id is not None:
+                        precomputed_tags[post.id] = [t for t in assessment.tags if t.startswith('#')]
+                    if visible == post.is_hidden:
+                        post.is_hidden = not visible
+                        db.add(post)
+                        await db.commit()
+                    if visible:
+                        await format_post_for_search(post, db, regenerate=True)
+                    print(f'[-] post {"hidden" if not visible else "kept"} after ingestion')
+                    post.is_ingested = True
+                    db.add(post)
+                    await db.commit()
+                except Exception as e:
+                    errors.append(FetchError(f"Error ingesting {post.id}", [e]))
     except Exception as e:
         errors.append(FetchError("Error ingesting posts", [e]))
 
@@ -109,6 +162,7 @@ async def generate_tags(
     db: AsyncSession,
     ids: Optional[List[int]] = None,
     precomputed_tags: Optional[Dict[int, List[str]]] = None,
+    batch_size: int = 10,
 ) -> None:
     errors = []
 
@@ -124,6 +178,29 @@ async def generate_tags(
         untagged_posts = res.all()
         print(f'[*] found {len(untagged_posts)} posts to tag')
 
+        # Separate posts into those with precomputed/extracted tags and those needing AI
+        ai_tag_posts: List[Post] = []  # Posts that need AI tag generation
+        ai_tag_contents: List[str] = []  # Their content for batching
+
+        for post in untagged_posts:
+            post_content = post.content_txt[:1000]
+            if _should_generate_ai_tags(post_content):
+                if precomputed_tags is not None and post.id is not None and post.id in precomputed_tags:
+                    pass  # Has precomputed tags, will use them below
+                else:
+                    ai_tag_posts.append(post)
+                    ai_tag_contents.append(post_content)
+
+        # Batch-generate tags for posts that need AI
+        ai_generated_tags: Dict[int, List[str]] = {}
+        if ai_tag_posts:
+            print(f'[*] batch-generating tags for {len(ai_tag_posts)} posts (batch_size={batch_size})')
+            batch_results = await prompt_tags_batch(ai_tag_contents, batch_size=batch_size)
+            for post, tags in zip(ai_tag_posts, batch_results):
+                if post.id is not None:
+                    ai_generated_tags[post.id] = tags
+
+        # Process all posts with their tags
         for i, post in enumerate(untagged_posts):
             try:
                 print(f'[*] tagging {i + 1}th post out of {len(untagged_posts)} total')
@@ -135,7 +212,10 @@ async def generate_tags(
                 if _should_generate_ai_tags(post_content):
                     if precomputed_tags is not None and post.id is not None and post.id in precomputed_tags:
                         generated_tags = precomputed_tags[post.id]
+                    elif post.id is not None and post.id in ai_generated_tags:
+                        generated_tags = ai_generated_tags[post.id]
                     else:
+                        # Fallback to single-post generation (shouldn't normally happen)
                         generated_tags = await prompt_tags(post_content)
                     tag_names.update(sorted(set(generated_tags), key=len)[:7])
 

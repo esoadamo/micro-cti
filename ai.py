@@ -27,6 +27,16 @@ class CybersecurityPostAssessment(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class BatchCybersecurityPostAssessment(BaseModel):
+    """Batch classification results. One entry per post, in order."""
+    results: list[CybersecurityPostAssessment]
+
+
+class BatchTagResult(BaseModel):
+    """Batch tag generation results. One list of hashtags per post, in order."""
+    results: list[list[str]]
+
+
 def get_model() -> Model:
     with open(FILE_CONFIG, 'rb') as f:
         config = tomllib.load(f)["ai"]
@@ -131,6 +141,74 @@ async def prompt_classify_and_tag_post(post: Post, include_tags: bool) -> Cybers
         truncated_content,
         CybersecurityPostAssessment,
     )
+
+
+async def prompt_classify_and_tag_posts_batch(
+    posts: List[Post], include_tags: bool, batch_size: int = 10
+) -> List[CybersecurityPostAssessment]:
+    """Classify and tag multiple posts in batched API calls to save system prompt tokens."""
+    if not posts:
+        return []
+    all_results: List[CybersecurityPostAssessment] = []
+    for i in range(0, len(posts), batch_size):
+        batch = posts[i:i + batch_size]
+        user_prompt = "\n---\n".join(
+            f"POST {j + 1}:\n{post.content_txt[:500].replace(chr(10), ' ')}"
+            for j, post in enumerate(batch)
+        )
+        base_classify = environ.get(
+            'SYSTEM_PROMPT_CLASSIFY_POST',
+            'Determine whether each post is in English and about cybersecurity '
+            '(tools, attacks, vulnerabilities, threats, exploits, or hacks).'
+        )
+        system_prompt = (
+            f"You will receive {len(batch)} posts separated by '---'. "
+            f"{base_classify} "
+            "Return a 'results' array with one entry per post in the same order. "
+            "Each entry must have 'is_cybersecurity' (bool) and 'tags' (list). "
+        )
+        if include_tags:
+            system_prompt += (
+                "If a post is about cybersecurity, return up to 7 English cybersecurity "
+                "hashtags in camelCase, each starting with #, in its tags field. "
+                "Otherwise, return an empty tags list."
+            )
+        else:
+            system_prompt += "Return empty tags lists for all posts."
+
+        batch_result = await prompt(system_prompt, user_prompt, BatchCybersecurityPostAssessment)
+        results = batch_result.results[:len(batch)]
+        # Pad with safe defaults if model returned fewer results than expected
+        while len(results) < len(batch):
+            results.append(CybersecurityPostAssessment(is_cybersecurity=False, tags=[]))
+        all_results.extend(results)
+    return all_results
+
+
+async def prompt_tags_batch(texts: List[str], batch_size: int = 10) -> List[List[str]]:
+    """Generate tags for multiple texts in batched API calls to save system prompt tokens."""
+    if not texts:
+        return []
+    all_results: List[List[str]] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        user_prompt = "\n---\n".join(
+            f"POST {j + 1}:\n{text[:400].replace(chr(10), ' ')}"
+            for j, text in enumerate(batch)
+        )
+        system_prompt = environ.get(
+            "SYSTEM_PROMPT_BATCH_GENERATE_TAGS",
+            f"You will receive {len(batch)} posts separated by '---'. "
+            "For each post, generate max 7 cybersecurity hashtags in camelCase English, "
+            "each starting with #. Return a 'results' array with one list of hashtags per "
+            "post in the same order.",
+        )
+        batch_result = await prompt(system_prompt, user_prompt, BatchTagResult)
+        results = batch_result.results[:len(batch)]
+        while len(results) < len(batch):
+            results.append([])
+        all_results.extend([[x for x in tags if x.startswith('#')] for tags in results])
+    return all_results
 
 
 if __name__ == "__main__":
