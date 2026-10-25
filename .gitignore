@@ -13,3 +13,5 @@ cache
 data
 logs
 backup
+.coverage
+.pytest_cache/
