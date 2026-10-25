@@ -1,7 +1,6 @@
 import asyncio
 import tomllib
 from http.client import responses
-from random import choice
 from typing import TypeVar, List, Union
 from os import environ
 from pydantic import BaseModel, Field
@@ -37,9 +36,9 @@ class BatchTagResult(BaseModel):
     results: list[list[str]]
 
 
-def get_model() -> Model:
+def get_model(key: str = "ai") -> Model:
     with open(FILE_CONFIG, 'rb') as f:
-        config = tomllib.load(f)["ai"]
+        config = tomllib.load(f)[key]
 
     api_keys: Union[str, List[str]] = config["api_key"]
     if isinstance(api_keys, str):
@@ -47,14 +46,17 @@ def get_model() -> Model:
     assert isinstance(api_keys, list)
 
     if config.get("provider") == "mistral":
-        models = [MistralModel(config["model"], provider=MistralProvider(api_key=x)) for x in api_keys]
-        return FallbackModel(*models)
+        models: list[Model] = [MistralModel(config["model"], provider=MistralProvider(api_key=x)) for x in api_keys]
+    else:
+        models: list[Model] = [OpenAIChatModel(model_name=config["model"], provider=OpenAIProvider(base_url=config["base_url"], api_key=x)) for x in api_keys]
 
-    # noinspection PyTypeChecker
-    return OpenAIChatModel(
-        model_name=config["model"],
-        provider=OpenAIProvider(base_url=config["base_url"], api_key=choice(api_keys)),
-    )
+    if key == "ai":
+        try:
+            models.append(get_model("ai-fallback"))
+        except KeyError:
+            pass
+    
+    return FallbackModel(*models)
 
 
 async def prompt(system_prompt: str, user_prompt: str, output_type: type[T], retries: int = 3) -> T:
