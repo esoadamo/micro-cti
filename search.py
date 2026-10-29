@@ -3,7 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from typing import List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
+from typing import AsyncIterator, List, Tuple, Union, Iterable, Optional, Dict, Set, TypedDict
 
 import fuzzywuzzy.fuzz
 import fuzzywuzzy.process
@@ -49,6 +49,9 @@ WORD: /[^\s()]+/
 
 SEARCH_PARSER = Lark(SEARCH_GRAMMAR, start='start', parser='lalr')
 SEARCH_FETCH_STEP = 1000
+FTS_RESULT_CACHE_ERROR_CODE = 188
+# One boolean-mode token: optional operator prefix (+ - < > ~) followed by a "phrase" or a bare word
+FTS_TOKEN_RE = re.compile(r'([+\-<>~]*)(?:"([^"]*)"|(\S+))')
 
 
 
@@ -307,6 +310,119 @@ def parse_search_commands(fulltext: str, count: int = 40, min_score: int = 15) -
     }
 
 
+def _is_fts_result_cache_error(exc: Exception) -> bool:
+    orig = getattr(exc, "orig", exc)
+    args = getattr(orig, "args", ())
+    return bool(args) and args[0] == FTS_RESULT_CACHE_ERROR_CODE
+
+
+def build_like_conditions(term: str) -> Optional[Tuple[str, Dict[str, str]]]:
+    """
+    Translate a MySQL boolean-mode term into LIKE conditions with the same semantics:
+    +word required, -word excluded, plain word optional (at least one must match when nothing is
+    required), word* prefix match, "phrase" literal match. Weight operators (< > ~) are ignored.
+    Returns (sql, params) or None when the term cannot match anything (no positive words).
+    """
+    required: List[str] = []
+    excluded: List[str] = []
+    optional: List[str] = []
+    for match in FTS_TOKEN_RE.finditer(term):
+        prefix, phrase, word = match.groups()
+        value = (phrase if phrase is not None else word.replace('"', '')).rstrip('*').strip().lower()
+        if not re.search(r"\w", value):
+            continue
+        if '+' in prefix:
+            required.append(value)
+        elif '-' in prefix:
+            excluded.append(value)
+        else:
+            optional.append(value)
+
+    if not required and not optional:
+        return None
+
+    params: Dict[str, str] = {}
+
+    def like(value: str, negate: bool = False) -> str:
+        key = f"like_{len(params)}"
+        params[key] = "%" + re.sub(r"([!%_])", r"!\1", value) + "%"
+        return f"content_search {'NOT ' if negate else ''}LIKE :{key} ESCAPE '!'"
+
+    clauses = [like(value) for value in required]
+    clauses += [like(value, negate=True) for value in excluded]
+    if not required:
+        clauses.append("(" + " OR ".join(like(value) for value in optional) + ")")
+    return " AND ".join(clauses), params
+
+
+async def __execute_like_search(
+        term: str,
+        search_latest_hard: datetime,
+        search_earliest_hard: datetime,
+        db: AsyncSession,
+        results_max: int,
+) -> list:
+    """Fallback search that uses the created_at index instead of the fulltext index."""
+    like_conditions = build_like_conditions(term)
+    if like_conditions is None:
+        return []
+    like_sql, like_params = like_conditions
+    stmt = text(
+        "SELECT id, content_search "
+        "FROM Post WHERE "
+        "is_hidden = false "
+        "AND (created_at BETWEEN :date_from AND :date_to) "
+        f"AND {like_sql} "
+        "ORDER BY created_at DESC "
+        f"LIMIT {int(results_max) * 10}"
+    )
+    params = {
+        **like_params,
+        "date_from": search_earliest_hard.strftime('%Y-%m-%d %H:%M:%S'),
+        "date_to": search_latest_hard.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    res = await db.exec(stmt, params=params)
+    return list(res.mappings())
+
+
+async def __execute_search(
+        term: str,
+        search_latest_hard: datetime,
+        search_earliest_hard: datetime,
+        db: AsyncSession,
+        results_max: int,
+) -> AsyncIterator[Post]:
+    """
+    Run the fulltext query for the term within the given time boundaries.
+    If MySQL fails with 'FTS query exceeds result cache limit' (error 188), the same term is
+    searched using LIKE conditions filtered by the indexed created_at column.
+    """
+    stmt = text(
+        "SELECT id, content_search "
+        "FROM Post WHERE "
+        "is_hidden = false "
+        "AND MATCH(content_search) AGAINST(:term IN BOOLEAN MODE) "
+        "AND (created_at BETWEEN :date_from AND :date_to) "
+        f"LIMIT {int(results_max) * 10}"
+    )
+    params = {
+        "term": term,
+        "date_from": search_earliest_hard.strftime('%Y-%m-%d %H:%M:%S'),
+        "date_to": search_latest_hard.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    try:
+        res = await db.exec(stmt, params=params)
+        rows = list(res.mappings())
+    except Exception as exc:
+        if not _is_fts_result_cache_error(exc):
+            raise
+        print(f"[!] FTS result cache limit reached for {term=}, falling back to LIKE search")
+        rows = await __execute_like_search(term, search_latest_hard, search_earliest_hard, db, results_max)
+
+    for row in rows:
+        yield Post(id=row["id"], content_search=row["content_search"])
+
+
 async def search_posts(
         fulltext: str,
         db: AsyncSession,
@@ -355,20 +471,11 @@ async def search_posts(
     matched_ids_score: Dict[int, float] = {}
     time_db_start = time.time()
     posts = []
-    search_latest_hard_str = search_latest_hard.strftime('%Y-%m-%d')
-    search_earliest_hard_str = search_earliest_hard.strftime('%Y-%m-%d')
+    search_latest_hard_end = search_latest_hard.replace(hour=23, minute=59, second=59, microsecond=0)
+    search_earliest_hard_start = search_earliest_hard.replace(hour=0, minute=0, second=0, microsecond=0)
     for term in search_terms:
-        stmt = text(
-            f"SELECT id, content_search "
-            f"FROM Post WHERE "
-            f"is_hidden = false "
-            f"AND MATCH(content_search) AGAINST(:term IN BOOLEAN MODE) "
-            f"AND (created_at BETWEEN '{search_earliest_hard_str} 00:00:00' AND '{search_latest_hard_str} 23:59:59') "
-            f"LIMIT {results_max * 10}"
-        )
-        res = await db.exec(stmt, params={"term": term})
-        for row in res.mappings():
-            posts.append(Post(id=row["id"], content_search=row["content_search"]))
+        async for post in __execute_search(term, search_latest_hard_end, search_earliest_hard_start, db, results_max):
+            posts.append(post)
     back_data.setdefault('time_goal_db', 0.0)
     back_data['time_goal_db'] += time.time() - time_db_start
 

@@ -43,7 +43,7 @@ class Post(SQLModel, table=True):
     source_id: Optional[str] = Field(default=None)
     source: str = Field(sa_column=Column(String(255)))
     user: str = Field(sa_column=Column(String(255)))
-    created_at: datetime
+    created_at: datetime = Field(index=True)
     fetched_at: datetime
     url: str = Field(sa_column=Column(String(512)))
     content_html: str = Field(sa_column=Column(Text))
